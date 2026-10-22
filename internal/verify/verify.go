@@ -221,6 +221,8 @@ func build(repo, df, tag string, timeout time.Duration) Step {
 	start := time.Now()
 	err := c.Run()
 	st := Step{Item: buildItem(df), Ran: true}
+	// the build cache from --no-cache --pull builds adds up fast; drop it every time
+	defer func() { _ = exec.Command("docker", "builder", "prune", "-af").Run() }()
 	if err != nil {
 		tail := strings.Join(strings.Fields(lastLines(out.String(), 6)), " ")
 		if len(tail) > 300 {
@@ -228,6 +230,12 @@ func build(repo, df, tag string, timeout time.Duration) Step {
 		}
 		if ctx.Err() != nil {
 			tail = "timed out after " + timeout.String()
+		}
+		if strings.Contains(out.String(), "no space left on device") {
+			// the host ran out of disk: not a verdict on the Dockerfile
+			st.Ran = false
+			st.Detail = "not run: docker host out of disk (prune and re-run)"
+			return st
 		}
 		st.Detail = "build failed: " + tail
 		return st
