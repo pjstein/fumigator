@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pjstein/fumigator/internal/findings"
+	_ "github.com/pjstein/fumigator/internal/host/collectors" // registers every collector
 	"github.com/pjstein/fumigator/internal/pack"
 	"github.com/pjstein/fumigator/internal/version"
 )
@@ -21,9 +22,10 @@ type Finding = findings.Finding
 
 type Action struct {
 	Finding Finding
-	Command string
+	Command string // run by --apply (unless Sudo)
 	Sudo    bool
-	Manual  string
+	Suggest string // printed for the person, never run
+	Manual  string // the reason
 	Ran     bool
 	Err     string
 }
@@ -99,15 +101,19 @@ func Evaluate(p *pack.Pack, tables map[string]*Table) ([]Finding, []Action) {
 				f.Note = strings.TrimSpace(interpolate(fx.Manual, r, fixed) + " " + f.Note)
 			}
 			out = append(out, f)
-			acts = append(acts, Action{Finding: f, Command: f.FixText, Sudo: fx.Sudo, Manual: f.Note})
+			acts = append(acts, Action{Finding: f, Command: f.FixText, Sudo: fx.Sudo, Suggest: interpolate(fx.Suggest, r, fixed), Manual: f.Note})
 			if h.Once && h.Version != nil {
 				break
 			}
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return findings.SeverityRank[out[i].Severity] < findings.SeverityRank[out[j].Severity]
+	sort.SliceStable(acts, func(i, j int) bool {
+		return findings.SeverityRank[acts[i].Finding.Severity] < findings.SeverityRank[acts[j].Finding.Severity]
 	})
+	out = out[:0]
+	for _, a := range acts {
+		out = append(out, a.Finding)
+	}
 	return out, acts
 }
 
@@ -249,6 +255,54 @@ func Probe(p *pack.Pack) []ProbeResult {
 		out = append(out, res)
 	}
 	return out
+}
+
+// NeedsYou renders the items the tool will not run as a commented bash script: one comment
+// with severity, check and reason, then the command (sudo commands, suggested commands, and
+// commands that failed under --apply). Items with no known command get a comment only.
+func NeedsYou(p *pack.Pack, acts []Action, applied bool) string {
+	var b strings.Builder
+	n := 0
+	for _, a := range acts {
+		cmd := ""
+		switch {
+		case a.Sudo:
+			cmd = a.Command
+		case a.Err != "":
+			cmd = a.Command
+		case a.Command != "" && !applied:
+			continue // will run under --apply
+		case a.Command != "" && a.Ran:
+			continue
+		default:
+			cmd = a.Suggest
+		}
+		f := a.Finding
+		n++
+		what := f.Current
+		if f.Fixed != "" {
+			what += " -> " + f.Fixed
+		}
+		fmt.Fprintf(&b, "# [%s] %s: %s (%s)\n", f.Severity, f.Detector, what, f.State)
+		if a.Err != "" {
+			fmt.Fprintf(&b, "#   failed under --apply: %s\n", a.Err)
+		}
+		if a.Manual != "" {
+			fmt.Fprintf(&b, "#   %s\n", a.Manual)
+		} else if f.Note != "" {
+			fmt.Fprintf(&b, "#   %s\n", f.Note)
+		}
+		if cmd != "" {
+			fmt.Fprintf(&b, "%s\n", cmd)
+		} else {
+			b.WriteString("#   (no single command; decide and act by hand)\n")
+		}
+		b.WriteString("\n")
+	}
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("#!/usr/bin/env bash\n# %s on %s: %d item(s) fumigator did not run. Read each reason, delete what you don't want, then run.\nset -x\n\n", p.ID, Hostname(), n) + b.String()
 }
 
 func Hostname() string { h, _ := os.Hostname(); return h }

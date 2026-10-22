@@ -48,7 +48,14 @@ host checks against recorded tables. `make test` runs golangci-lint (config in
 
 `host` rules: plan only unless `--apply`; a `sudo: true` fix is printed, never run; each
 command runs once even when several rows need it; the pack's `verify` probes run after,
-and a client that still fetches the test page is reported as STILL TRUSTS.
+and a client that still fetches the test page is reported as STILL TRUSTS. Everything the
+tool will not run (sudo steps, decisions, failed commands) is printed as a commented bash
+script with the reason above each command and saved as
+`findings/<pack>/host-<hostname>-needs-you.sh`.
+
+Collectors are one file each under `internal/host/collectors/`; `fumigator host --collectors`
+lists every table with its columns and what it holds. Adding one is a new file that
+implements `table.Collector` and registers itself in `init()`.
 
 `fix` rules: dry run unless `--apply`; refuses a repo with modified tracked files; reuses the
 `sec/<pack-id>` branch; never force-pushes; never hand-edits a lockfile (a tool that is missing

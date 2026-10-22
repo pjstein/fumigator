@@ -398,6 +398,78 @@ host:
     fix:
       present: {command: "python3 -m pip install -q -U certifi", manual: "the certifi bundle python3 uses still lists the compromised roots"}
 
+  - id: gcloud-bundles
+    table: ca_bundles
+    where: {owner: gcloud, bad_roots: "re:."}
+    once: true
+    severity: {present: high}
+    fix:
+      present: {command: "gcloud components update --quiet", manual: "the gcloud SDK ships its own certifi/botocore bundles; a component update replaces them (re-run to confirm)"}
+
+  - id: aws-cli-bundle
+    table: ca_bundles
+    where: {owner: aws-cli, bad_roots: "re:."}
+    severity: {present: high}
+    fix:
+      present: {suggest: "curl -sSfo /tmp/AWSCLIV2.pkg https://awscli.amazonaws.com/AWSCLIV2.pkg && sudo installer -pkg /tmp/AWSCLIV2.pkg -target /", manual: "AWS CLI v2 bundles botocore's cacert.pem; reinstall the current package (the installed copy here is also an x86 build that cannot run on this Mac)"}
+
+  - id: nix-bundle
+    table: ca_bundles
+    where: {owner: nix, bad_roots: "re:."}
+    severity: {present: high}
+    fix:
+      present: {suggest: "nix-env -p /nix/var/nix/profiles/default -iA nixpkgs.cacert && nix-channel --update", manual: "nix fetches through its own cacert package in the default profile; upgrade it (profile is user-owned here, so no sudo)"}
+
+  - id: conda-env-bundle
+    table: ca_bundles
+    where: {owner: "re:^conda:", bad_roots: "re:."}
+    once: true
+    severity: {present: high}
+    fix:
+      present: {command: "for e in $(conda env list 2>/dev/null | awk 'NR>2 && $1!=\"\" {print $1}'); do conda update -y -n \"$e\" ca-certificates certifi; done", manual: "a conda environment's ssl bundle still lists the roots ({owner} at {path}); every env gets ca-certificates and certifi updated"}
+
+  - id: app-bundle
+    table: ca_bundles
+    where: {owner: "re:^app:", bad_roots: "re:."}
+    severity: {present: high}
+    fix:
+      present: {manual: "{owner} bundles its own CA file at {path}; update the app (check for updates in the app, or reinstall from the vendor)"}
+
+  - id: embedded-roots-cargo
+    table: binaries_embedding_roots
+    where: {manager: cargo, crate: "re:."}
+    severity: {present: high}
+    fix:
+      present: {suggest: "cargo install --force {crate}", manual: "{name} has a root store compiled in (rustls + webpki-roots); rebuilding pulls the fixed webpki-roots once the crate's dependency range allows it; re-run this check to confirm"}
+
+  - id: embedded-roots-brew
+    table: binaries_embedding_roots
+    where: {manager: brew}
+    severity: {present: high}
+    fix:
+      present: {suggest: "brew upgrade {name}", manual: "{name} has a root store compiled in; needs a rebuilt bottle from upstream; re-run this check after upgrading"}
+
+  - id: embedded-roots-other
+    table: binaries_embedding_roots
+    where: {manager: "re:^(local|uv-tool|go-install|bun|system|pixi)$"}
+    severity: {present: high}
+    fix:
+      present: {manual: "{name} at {path} has a root store compiled in; reinstall it from upstream (its own installer, npm, or cargo) and re-run this check"}
+
+  - id: podman-machine
+    table: container_vms
+    where: {runtime: podman}
+    severity: {present: medium}
+    fix:
+      present: {suggest: "podman machine stop {name}; podman machine rm -f {name} && podman machine init {name} && podman machine start {name}", manual: "the podman VM ({name}, created {created}) has its own Fedora CoreOS trust store; recreate it from a current image (containers and volumes inside it are lost; images re-pull)"}
+
+  - id: docker-desktop-vm
+    table: container_vms
+    where: {runtime: docker}
+    severity: {present: low}
+    fix:
+      present: {manual: "Docker Desktop {version}: install the current release (its VM trust store ships with the app), then rebuild images with --pull --no-cache"}
+
   - id: brew-ca-certificates
     table: brew_packages
     where: {name: ca-certificates}
@@ -413,7 +485,7 @@ host:
     severity: {vulnerable: high, eol: high}
     fix:
       vulnerable: {command: ". \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm install {fixed} && nvm alias default {fixed}"}
-      eol: {manual: "nvm uninstall {version} once no repo pins Node {major} (the repo scan lists the pins)."}
+      eol: {suggest: ". \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm uninstall {version}", manual: "Node {major} has no fixed release; uninstall once no repo pins it (the repo scan lists the pins)."}
 
   - id: nvm-node-superseded
     table: node_installs
@@ -421,8 +493,8 @@ host:
     version: {column: version, table: node, line_parts: 1}
     severity: {vulnerable: low, eol: low}
     fix:
-      vulnerable: {manual: "a fixed Node {major} is installed beside {version}; nvm uninstall {version} once nothing on this machine still selects it"}
-      eol: {manual: "an older build of EOL Node {major}; nvm uninstall {version}"}
+      vulnerable: {suggest: ". \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm uninstall {version}", manual: "a fixed Node {major} is installed beside {version}; remove it once nothing on this machine still selects it"}
+      eol: {suggest: ". \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm uninstall {version}", manual: "an older build of EOL Node {major}"}
 
   - id: fnm-volta-brew-node
     table: node_installs
@@ -438,7 +510,7 @@ host:
     where: {ssl: "false", kind: "re:^(pyenv|venv)$"}
     severity: {present: medium}
     fix:
-      present: {manual: "{path} was built without the ssl module (cannot reach PyPI): pyenv uninstall it or rebuild the same minor at its latest patch, and recreate venvs that inherit it"}
+      present: {suggest: "rm -rf \"$(dirname \"$(dirname '{path}')\")\"", manual: "{kind} {name} was built without the ssl module (it cannot reach PyPI at all): remove it, or rebuild the same minor at its latest patch and recreate venvs that inherit it"}
 
   - id: pyenv-certifi
     table: python_installs
@@ -450,20 +522,28 @@ host:
 
   - id: pyenv-pip
     table: python_installs
-    where: {kind: "re:^(pyenv|venv)$", ssl: "true", pip: "re:.", version: "re:^3\\.(9|[1-9][0-9])\\."}
+    where: {kind: "re:^(pyenv|venv|pythonorg)$", ssl: "true", pip: "re:.", version: "re:^3\\.(9|[1-9][0-9])\\."}
     version: {column: pip, table: pip}
     severity: {vulnerable: medium}
     fix:
-      vulnerable: {command: "'{path}' -m pip install -q -U pip certifi"}
-    note: "pip vendors its own certifi copy; below the floor it trusts the chain when installing packages."
+      vulnerable: {command: "'{path}' -m pip install -q -U pip"}
+    note: "pip vendors its own certifi copy; below the floor it trusts the chain when installing packages. python.org interpreters ship pip this way."
+
+  - id: uv-python-pip
+    table: python_installs
+    where: {kind: uv, pip: "re:."}
+    version: {column: pip, table: pip}
+    severity: {vulnerable: low}
+    fix:
+      vulnerable: {suggest: "uv python install --reinstall $(echo '{name}' | cut -d- -f2 | cut -d. -f1,2)", manual: "uv-managed {name} ships an old pip with its own certifi; uv itself never uses that pip (PEP 668 blocks upgrading it), so this only matters if you run python -m pip inside it. A reinstall picks up a current build."}
 
   - id: pyenv-pip-old-python
     table: python_installs
-    where: {kind: "re:^(pyenv|venv)$", ssl: "true", pip: "re:.", version: "re:^3\\.[0-8]\\."}
+    where: {kind: "re:^(pyenv|venv|pythonorg|uv)$", ssl: "true", pip: "re:.", version: "re:^3\\.[0-8]\\."}
     version: {column: pip, table: pip}
     severity: {vulnerable: medium}
     fix:
-      vulnerable: {manual: "Python {version} at {path} cannot run pip {fixed} (needs 3.9+); its pip keeps a stale vendored certifi. Retire the interpreter, or export PIP_CERT=/etc/ssl/cert.pem when using it."}
+      vulnerable: {suggest: "pyenv uninstall -f {name}", manual: "Python {version} at {path} cannot run pip {fixed} (needs 3.9+); its pip keeps a stale vendored certifi. Retire the interpreter, or export PIP_CERT=/etc/ssl/cert.pem when using it."}
 
   - id: venv-certifi
     table: python_installs
@@ -489,7 +569,24 @@ host:
     version: {column: certifi, table: certifi}
     severity: {vulnerable: high}
     fix:
-      vulnerable: {command: "conda update -y -n base certifi ca-certificates"}
+      vulnerable: {command: "conda update -y -n {name} certifi ca-certificates"}
+
+  - id: uv-tool-certifi
+    table: python_installs
+    where: {kind: uv-tool, certifi: "re:."}
+    version: {column: certifi, table: certifi}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "uv tool upgrade {name}"}
+    note: "uv tool environments have no pip; uv re-resolves the tool's dependencies, certifi included."
+
+  - id: pipx-certifi
+    table: python_installs
+    where: {kind: pipx, certifi: "re:."}
+    version: {column: certifi, table: certifi}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "pipx upgrade {name}"}
 
   - id: go-toolchain
     table: tools
@@ -594,9 +691,3 @@ host:
       vulnerable: {manual: "{app} ships Electron {version}; update the app (needs >= {fixed})"}
       eol: {manual: "{app} ships Electron {version}, a line with no fix; update the app to a 42+ build"}
 
-  - id: docker-desktop
-    table: tools
-    where: {name: docker}
-    severity: {present: low}
-    fix:
-      present: {manual: "Docker Desktop: check for updates; rebuild images from updated bases with --pull --no-cache"}

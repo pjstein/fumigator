@@ -47,6 +47,22 @@ packs are the reference. Read both before writing.
 8. **Skill.** Copy `skills/php2shell-remediation/SKILL.md`, change the pack id and the
    state explanations. No version numbers in the skill.
 
+## Host checks and collectors
+
+A pack's `host:` block queries the tables `fumigator host --collectors` lists. A check names
+a table, filters rows with `where`, and either compares one column against a versions table
+or reports matching rows as `present`. Every state gets a `fix`: `command` (run by `--apply`),
+`sudo: true` (printed, never run), or `suggest` plus `manual` (a command and the reason, for a
+decision the person makes). Prefer a `suggest` over a bare `manual`: the person should get a
+command to run, not a sentence.
+
+When the inventory shows something no table covers, add a collector, not a special case in
+a check: a new file in `internal/host/collectors/` that implements `table.Collector` and calls
+`table.Register` in `init()`. Columns are the contract packs write against, so name them for
+what a check will filter on (`manager`, `kind`, `owner`, `superseded`). Shell out to the
+tool that owns the facts, return an empty table when it is not installed, and mark the
+collector `Slow()` if it walks the disk or touches the network.
+
 ## Rules
 
 - A version number lives in exactly one place: the pack's `versions` block.

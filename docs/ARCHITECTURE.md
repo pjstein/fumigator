@@ -154,26 +154,27 @@ Checked on 2026-10-22:
 ## Host checks
 
 `fumigator host` inventories the machine as tables, the way osquery does, and the pack's
-`host:` block queries them. Collectors (`internal/host/collect.go`) shell out to the manager
-that owns each runtime so the facts match what that tool reports, and run concurrently:
-
-| table | columns |
-|---|---|
-| `system` | os, version, pending_updates |
-| `tools` | name, version, path, manager (brew, nvm, pyenv, rustup, apple, system, …) |
-| `brew_packages` | name, version (date-style versions normalised to dotted) |
-| `node_installs` | manager, version, major, path, default |
-| `python_installs` | kind (pyenv, brew:python@3.x, apple, conda, venv), path, version, ssl, certifi, pip |
-| `jdk_keystore_aliases` | alias, keystore |
-| `electron_apps` | app, version, major, path |
-| `ca_bundles` | path, owner, bad_roots (names from the pack's `strings`) |
-| `php_ini` | path, upload_progress_enabled |
+`host:` block queries them. Each collector is one file under `internal/host/collectors/`
+implementing `table.Collector` (name, columns, one-line doc, platforms, slow flag, Collect)
+and registering itself in `init()`; `internal/host/table` holds the interface, the registry
+and shared helpers. Collectors shell out to the manager that owns each runtime so the facts
+match what that tool reports, and run concurrently; `--fast` skips the slow ones.
+`fumigator host --collectors` prints the current list with columns and docs, which is the
+source of truth rather than this document. As of 2026-10-22: system, tools, brew_packages,
+node_installs, python_installs (pyenv, Homebrew, python.org, uv, Apple, conda base and envs,
+project venvs, uv tool envs, pipx venvs), jdk_keystore_aliases, electron_apps, ca_bundles
+(system, Homebrew, nix, certifi, gcloud, AWS CLI, conda envs, .app bundles),
+binaries_embedding_roots (executables whose bytes contain a compromised root name: compiled-in
+trust stores such as rustls + webpki-roots), container_vms (podman machine, Docker Desktop,
+colima), php_ini.
 
 A host check names a table, filters rows with `where` (literal or `re:`), and either compares
 one column against a versions table (states vulnerable / eol / floating / unknown) or reports
 every matching row as `present`. Fixes are commands with `{column}` and `{fixed}`
-interpolated; `sudo: true` marks a command the tool prints but never runs; `once: true`
-collapses many rows into one action. The pack's `verify` probes run after apply.
+interpolated; `sudo: true` marks a command the tool prints but never runs; `suggest:` is a
+command printed for the person next to the `manual:` reason, for decisions the tool must
+not make; `once: true` collapses many rows into one action. The pack's `verify` probes run
+after apply.
 
 Why not osquery itself: it is a C++ daemon with its own build and privilege model, and the Go
 bindings only write extensions for a running `osqueryd`. The dozen collectors we need are a

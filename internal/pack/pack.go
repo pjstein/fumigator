@@ -123,9 +123,10 @@ type HostVersion struct {
 }
 
 type HostFix struct {
-	Command string `yaml:"command"` // shell command; empty means manual
+	Command string `yaml:"command"` // shell command the tool runs with --apply; empty means manual
 	Sudo    bool   `yaml:"sudo"`    // never run automatically; printed for the user
-	Manual  string `yaml:"manual"`  // text for the user (used when Command is empty or Sudo)
+	Suggest string `yaml:"suggest"` // a command for the user to run after deciding; never run by the tool
+	Manual  string `yaml:"manual"`  // the reason / decision, shown with the suggested command
 }
 
 type Probe struct {

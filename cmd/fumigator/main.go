@@ -394,8 +394,16 @@ func cmdHost(args []string) error {
 	venvRoots := fs.String("venv-roots", "", "comma-separated dirs to search for Python venvs")
 	out := fs.String("out", "findings", "output directory for the host report")
 	dump := fs.Bool("tables", false, "print the collected tables and exit")
+	listC := fs.Bool("collectors", false, "list the collectors (tables, columns, what they hold) and exit")
+	fast := fs.Bool("fast", false, "skip slow collectors (OS update check, venv walk, bundle and binary scans)")
 	pd := packsDir(fs)
 	_ = fs.Parse(args) // ExitOnError
+	if *listC {
+		for _, c := range host.Collectors() {
+			fmt.Printf("%-26s %s\n%-26s columns: %s\n", c.Name(), c.Doc(), "", strings.Join(c.Columns(), ", "))
+		}
+		return nil
+	}
 	ps, err := loadPacks(*pd, packs)
 	if err != nil {
 		return err
@@ -410,7 +418,7 @@ func cmdHost(args []string) error {
 		roots = strings.Split(*venvRoots, ",")
 	}
 	t0 := time.Now()
-	tables := host.Collect(host.Options{VenvRoots: roots, BadRoots: bad})
+	tables := host.Collect(host.Options{VenvRoots: roots, BadRoots: bad, Fast: *fast})
 	fmt.Fprintf(os.Stderr, "collected %d tables in %.1fs\n", len(tables), time.Since(t0).Seconds())
 	if *dump {
 		names := make([]string, 0, len(tables))
@@ -460,10 +468,8 @@ func cmdHost(args []string) error {
 			switch {
 			case a.Sudo:
 				nManual++
-				fmt.Printf("  SUDO    [%s] %s: %s (%s)\n          $ %s\n          %s\n", f.Severity, f.Detector, f.Current, f.State, a.Command, a.Manual)
 			case a.Command == "":
 				nManual++
-				fmt.Printf("  TODO    [%s] %s: %s (%s) %s\n", f.Severity, f.Detector, f.Current, f.State, a.Manual)
 			case a.Err != "":
 				nFail++
 				fmt.Printf("  FAILED  [%s] %s: %s -> %s\n          $ %s\n          %s\n", f.Severity, f.Detector, f.Current, f.Fixed, a.Command, a.Err)
@@ -472,6 +478,20 @@ func cmdHost(args []string) error {
 				fmt.Printf("  RAN     [%s] %s: %s -> %s\n          $ %s\n", f.Severity, f.Detector, f.Current, f.Fixed, a.Command)
 			default:
 				fmt.Printf("  PLAN    [%s] %s: %s -> %s\n          $ %s\n", f.Severity, f.Detector, f.Current, f.Fixed, a.Command)
+			}
+		}
+		script := host.NeedsYou(p, acts, *apply)
+		if script != "" {
+			sp := filepath.Join(*out, p.ID, "host-"+host.Hostname()+"-needs-you.sh")
+			if err := os.MkdirAll(filepath.Dir(sp), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(sp, []byte(script), 0o755); err != nil {
+				return err
+			}
+			fmt.Printf("  -- needs you: commands and reasons (also saved to %s)\n", sp)
+			for _, l := range strings.Split(strings.TrimSpace(script), "\n")[3:] {
+				fmt.Println("  " + l)
 			}
 		}
 		probes := host.Probe(p)
