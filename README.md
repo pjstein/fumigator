@@ -82,6 +82,10 @@ table of every edit, lockfiles regenerated, a checklist of what a person must de
 how to verify. A repo whose findings are all decisions gets the body written to
 `.git/PR_BODY.md` and no PR. `findings/<pack>/fix-log.md` maps repo to PR.
 
+```bash
+fumigator pr ready --pack emudhra-ca-2026-10 --findings findings [--no-checks]   # un-draft PRs whose checks all pass
+```
+
 ## Packs
 
 A pack is one YAML file: advisory metadata, fixed-version tables, detectors for repository

@@ -23,6 +23,7 @@ fumigator host --pack <id> [--apply] [--tables] [--collectors] [--fast]
 fumigator scan --pack <id> [--pack <id2>] [--org ORG] --out findings ROOT...
 fumigator gh sync --org ORG DEST
 fumigator fix --pack <id> --findings findings [--apply] [--run-tools] [--pr --draft] [--only name,..]
+fumigator pr ready --pack <id> --findings findings [--no-checks]
 fumigator pack lint | test [PACK...]
 ```
 

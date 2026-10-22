@@ -50,6 +50,8 @@ func main() {
 		err = cmdHost(os.Args[2:])
 	case "gh":
 		err = cmdGH(os.Args[2:])
+	case "pr":
+		err = cmdPR(os.Args[2:])
 	case "pack":
 		err = cmdPack(os.Args[2:])
 	case "list":
@@ -77,6 +79,7 @@ func usage() {
                   [--branch NAME] [--base BRANCH] [--body-only PATH --only NAME]
   fumigator host  --pack ID [--pack ID...] [--apply] [--only id,..] [--venv-roots DIR,..] [--out DIR] [--tables]
   fumigator gh    sync --org ORG [--workers N] [--depth N] DEST
+  fumigator pr    ready --pack ID --findings DIR [--no-checks]   un-draft PRs from fix-log.md whose checks all pass
   fumigator pack  test [PACK...]
   fumigator pack  lint [PACK...]
   fumigator list
@@ -581,6 +584,60 @@ func cmdHost(args []string) error {
 			fmt.Printf("  %d commands planned, %d need you. Re-run with --apply. Report: %s\n\n", len(acts)-nManual, nManual, rp)
 		}
 	}
+	return nil
+}
+
+func cmdPR(args []string) error {
+	if len(args) < 1 || args[0] != "ready" {
+		return fmt.Errorf("usage: fumigator pr ready --pack ID --findings DIR [--no-checks]")
+	}
+	fs := flag.NewFlagSet("pr ready", flag.ExitOnError)
+	packRef := fs.String("pack", "", "pack id")
+	dir := fs.String("findings", "findings", "findings directory holding <pack>/fix-log.md")
+	noChecks := fs.Bool("no-checks", false, "also un-draft PRs in repos that have no CI checks at all")
+	_ = fs.Parse(args[1:]) // ExitOnError
+	if *packRef == "" {
+		return fmt.Errorf("--pack is required")
+	}
+	urls, err := gh.PRsFromLog(filepath.Join(*dir, *packRef, "fix-log.md"))
+	if err != nil {
+		return err
+	}
+	results := make([]gh.PRState, len(urls))
+	sem := make(chan struct{}, 6)
+	var wg sync.WaitGroup
+	for i, u := range urls {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, u string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i] = gh.Ready(u, *noChecks)
+		}(i, u)
+	}
+	wg.Wait()
+	counts := map[string]int{}
+	for _, r := range results {
+		counts[r.Action]++
+		switch r.Action {
+		case "ready":
+			fmt.Printf("  READY        %s\n", r.URL)
+		case "failed":
+			fmt.Printf("  FAILED       %s  %s\n", r.URL, r.Err)
+		case "left-draft":
+			why := "no checks"
+			switch {
+			case r.Err != "":
+				why = r.Err
+			case len(r.Failing) > 0:
+				why = "failing: " + strings.Join(r.Failing, ", ")
+			case len(r.Pending) > 0:
+				why = "pending: " + strings.Join(r.Pending, ", ")
+			}
+			fmt.Printf("  draft        %s  (%s)\n", r.URL, why)
+		}
+	}
+	fmt.Printf("ready now: %d  already ready: %d  left draft: %d  failed: %d\n", counts["ready"], counts["already-ready"], counts["left-draft"], counts["failed"])
 	return nil
 }
 
