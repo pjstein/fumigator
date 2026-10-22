@@ -103,7 +103,7 @@ Markdown for anything else): which pack to run, what the states mean, which deci
 the agent's and which are a person's, and how to write the PR. Install them with:
 
 ```bash
-fumigator skills install            # into ~/.claude/skills
+fumigator skills install            # into ~/.claude/skills, as fumigator-<name> (--prefix to change)
 ```
 
 [AGENTS.md](AGENTS.md) is the orientation file for an agent working in this repository.

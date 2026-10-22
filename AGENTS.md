@@ -11,8 +11,8 @@ repositories, and across a GitHub organisation. Read this file, then `README.md`
 - A **pack** (`packs/<id>/pack.yaml`) holds everything incident-specific. Version numbers
   and patterns live there and nowhere else. If a finding is wrong, fix the pack, not the
   finding.
-- A **skill** (`skills/<id>-remediation/SKILL.md`) is the brief for the decisions the binary
-  will not make: moving a service off an EOL runtime, replacing a vendored CA bundle,
+- A **skill** (`skills/<id>-remediation/SKILL.md`, installed as `fumigator-<id>-remediation`)
+  is the brief for the decisions the binary will not make: moving a service off an EOL runtime, replacing a vendored CA bundle,
   anything that changes what software an app runs on.
 
 ## Commands you will use

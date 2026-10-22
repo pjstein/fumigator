@@ -80,7 +80,7 @@ func usage() {
   fumigator pack  test [PACK...]
   fumigator pack  lint [PACK...]
   fumigator list
-  fumigator skills install [--dir ~/.claude/skills]     copy the agent skills out of the binary
+  fumigator skills install [--dir ~/.claude/skills] [--prefix fumigator-]   copy the agent skills out of the binary
 `)
 }
 
@@ -146,8 +146,10 @@ func cmdSkills(args []string) error {
 	fs := flag.NewFlagSet("skills install", flag.ExitOnError)
 	home, _ := os.UserHomeDir()
 	dir := fs.String("dir", filepath.Join(home, ".claude", "skills"), "skills directory")
+	prefix := fs.String("prefix", "fumigator-", "prefix for each installed skill's directory and name")
 	_ = fs.Parse(args[1:]) // ExitOnError
 	n := 0
+	var names []string
 	err := iofs.WalkDir(fumigator.Skills, "skills", func(p string, d iofs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -156,7 +158,15 @@ func cmdSkills(args []string) error {
 		if err != nil {
 			return err
 		}
-		dst := filepath.Join(*dir, strings.TrimPrefix(p, "skills/"))
+		rel := strings.TrimPrefix(p, "skills/")
+		skill, rest, _ := strings.Cut(rel, "/")
+		scoped := *prefix + skill
+		if rest == "SKILL.md" {
+			// the frontmatter name is what the agent lists the skill as; scope it the same way
+			b = []byte(strings.Replace(string(b), "\nname: "+skill+"\n", "\nname: "+scoped+"\n", 1))
+			names = append(names, scoped)
+		}
+		dst := filepath.Join(*dir, scoped, rest)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}
@@ -169,7 +179,8 @@ func cmdSkills(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("installed %d files under %s\n", n, *dir)
+	sort.Strings(names)
+	fmt.Printf("installed %d files under %s: %s\n", n, *dir, strings.Join(names, ", "))
 	return nil
 }
 
