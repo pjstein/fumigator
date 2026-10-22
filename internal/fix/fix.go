@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -213,12 +214,7 @@ func (r *remediator) alreadyApplied(f findings.Finding) bool {
 	if f.Replace != "" && f.FixPattern == "" {
 		want = strings.Replace(f.Match, f.Replace, f.FixText, 1)
 	}
-	for _, l := range lines {
-		if l == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(lines, want)
 }
 
 func (r *remediator) insertAfter(f findings.Finding) {
@@ -300,7 +296,7 @@ func (r *remediator) runTools(tools []findings.Finding) {
 
 // anyToolOnPath reports whether the first word of any "||"-separated alternative is installed.
 func anyToolOnPath(cmd string) bool {
-	for _, alt := range strings.Split(cmd, "||") {
+	for alt := range strings.SplitSeq(cmd, "||") {
 		w := strings.Fields(strings.TrimSpace(alt))
 		if len(w) > 0 {
 			if _, err := exec.LookPath(w[0]); err == nil {
@@ -317,9 +313,10 @@ func (r *remediator) commitAndPR(name string) {
 	for _, e := range r.res.Edits {
 		git(repo, "add", "--", e.File)
 	}
-	filepath.Walk(repo, func(p string, info os.FileInfo, err error) error {
+	// the callback never returns an error, so Walk cannot either
+	_ = filepath.Walk(repo, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // an unreadable entry is skipped, not fatal
 		}
 		if info.IsDir() {
 			switch info.Name() {
@@ -354,7 +351,9 @@ func (r *remediator) commitAndPR(name string) {
 	}
 	body := Body(r.p, name, r.res)
 	bp := filepath.Join(repo, ".git", "PR_BODY.md")
-	os.WriteFile(bp, []byte(body), 0o644)
+	if err := os.WriteFile(bp, []byte(body), 0o644); err != nil {
+		r.res.Skipped = append(r.res.Skipped, "write PR body: "+err.Error())
+	}
 	r.res.BodyPath = bp
 	if len(r.res.Edits) == 0 && len(r.res.Tools) == 0 && len(r.res.Manual) == 0 {
 		r.note("nothing to change; no PR")
@@ -479,7 +478,7 @@ func git(dir string, args ...string) *bytes.Buffer {
 	c := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	var out bytes.Buffer
 	c.Stdout = &out
-	c.Run()
+	_ = c.Run() // output-only helper; callers that need the status use gitErr
 	return &out
 }
 

@@ -31,7 +31,6 @@ fumigator/
     emudhra-ca-remediation/SKILL.md
     php2shell-remediation/SKILL.md
     pack-authoring/SKILL.md     how to write a new pack when the next advisory lands
-  emudhra/                per-Mac host scripts (to become `fumigator host`, driven by the pack)
 ```
 
 **One pack per vulnerability.** A pack is YAML: advisory metadata, a fixed-version table,
@@ -152,6 +151,36 @@ Checked on 2026-10-22:
   cloning (`org:X filename:Dockerfile php:8.1`), useless as the scan itself. The binary uses it
   to rank, then clones (shallow, concurrent) and scans locally.
 
+## Host checks
+
+`fumigator host` inventories the machine as tables, the way osquery does, and the pack's
+`host:` block queries them. Collectors (`internal/host/collect.go`) shell out to the manager
+that owns each runtime so the facts match what that tool reports, and run concurrently:
+
+| table | columns |
+|---|---|
+| `system` | os, version, pending_updates |
+| `tools` | name, version, path, manager (brew, nvm, pyenv, rustup, apple, system, …) |
+| `brew_packages` | name, version (date-style versions normalised to dotted) |
+| `node_installs` | manager, version, major, path, default |
+| `python_installs` | kind (pyenv, brew:python@3.x, apple, conda, venv), path, version, ssl, certifi, pip |
+| `jdk_keystore_aliases` | alias, keystore |
+| `electron_apps` | app, version, major, path |
+| `ca_bundles` | path, owner, bad_roots (names from the pack's `strings`) |
+| `php_ini` | path, upload_progress_enabled |
+
+A host check names a table, filters rows with `where` (literal or `re:`), and either compares
+one column against a versions table (states vulnerable / eol / floating / unknown) or reports
+every matching row as `present`. Fixes are commands with `{column}` and `{fixed}`
+interpolated; `sudo: true` marks a command the tool prints but never runs; `once: true`
+collapses many rows into one action. The pack's `verify` probes run after apply.
+
+Why not osquery itself: it is a C++ daemon with its own build and privilege model, and the Go
+bindings only write extensions for a running `osqueryd`. The dozen collectors we need are a
+few hundred lines of Go and ship in the same static binary. The table shape is borrowed so
+that, if fleet-wide coverage through Fleet or Kolide is wanted later, the same collectors can
+be exposed as an osquery extension without changing the packs.
+
 ## CLI
 
 ```
@@ -159,7 +188,7 @@ fumigator scan   --pack php2shell-2026-10 [--pack ...] [--org ORG] ROOT...   -> 
 fumigator gh     sync --org ORG DEST          enumerate org, shallow-clone missing, fetch stale
 fumigator fix    --pack ID --findings DIR [--apply] [--run-tools] [--pr] [--only repo,...]
 fumigator verify --pack ID [--image TAG] [--repo PATH]
-fumigator host   --pack ID [--apply]           this machine (replaces emudhra-remediate.sh)
+fumigator host   --pack ID [--apply] [--only id,..] [--tables]   this machine
 fumigator pack   test|lint [packs/ID]
 ```
 
@@ -182,6 +211,7 @@ Findings JSON is the contract between scan, fix, and the skills, and the audit t
    a line by content when numbers drift and skips an edit that is already present.
 4. `package` detector on osv-scalibr; delete the hand-written lockfile parsing.
 5. `host` subcommand, ported from `emudhra-remediate.sh`, driven by the pack's `host:` block.
+   **Done**; the shell scripts are deleted.
 6. Split the skill into two per-vulnerability skills plus `pack-authoring`; delete the Python.
 
 Steps 1 to 3 are enough to run the org-wide scan and open the PRs with the binary.

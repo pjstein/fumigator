@@ -44,8 +44,15 @@ finding and in the PR checklist when the tool is missing here.
 
 ## Developer Macs
 
-`emudhra/emudhra-remediate.sh` (dry run by default, `--apply` to act) is the per-machine pass;
-`emudhra/emudhra-audit.sh` is read-only. `fumigator host` will replace them.
+```bash
+fumigator host --pack emudhra-ca-2026-10            # plan: PLAN / SUDO / TODO per finding, then probes
+fumigator host --pack emudhra-ca-2026-10 --apply    # run the non-sudo commands, then probes
+fumigator host --pack emudhra-ca-2026-10 --tables   # the raw inventory, for debugging a check
+```
+
+SUDO lines are printed with the exact command for the person to run. TODO lines are
+decisions (EOL Node lines still pinned by repos, Bun, Electron apps). The report lands in
+`findings/emudhra-ca-2026-10/host-<hostname>.json` with every table, finding, action and probe.
 
 ## Verify
 

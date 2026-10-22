@@ -31,8 +31,9 @@ type Pack struct {
 	// Strings: named string lists, for content detectors (bad root names, etc).
 	Strings map[string][]string `yaml:"strings"`
 
-	Detectors []Detector `yaml:"detectors"`
-	Verify    []Probe    `yaml:"verify"`
+	Detectors []Detector  `yaml:"detectors"`
+	Host      []HostCheck `yaml:"host"`
+	Verify    []Probe     `yaml:"verify"`
 
 	Dir string `yaml:"-"`
 }
@@ -94,6 +95,37 @@ type Fix struct {
 	Pattern string `yaml:"pattern"` // rewrite: optional regex applied to the matched line; To may use ${1}
 	To      string `yaml:"to"`      // rewrite/insert-after text; {fixed} {name} {current} interpolated
 	Command string `yaml:"command"` // tool: shell command; {fixed} {name} interpolated
+}
+
+// HostCheck queries one collector table on the local machine, osquery-style: rows are filtered
+// by Where (literal or "re:" regex per column), then either a Version comparison classifies each
+// row (vulnerable / eol / floating / ok / unknown) or, with no Version, every matching row is
+// "present". Fix commands interpolate {col} for any column of the row plus {fixed} and {line}.
+type HostCheck struct {
+	ID       string             `yaml:"id"`
+	Table    string             `yaml:"table"`
+	Where    map[string]string  `yaml:"where"`
+	Version  *HostVersion       `yaml:"version"`
+	Severity map[string]string  `yaml:"severity"`
+	Fix      map[string]HostFix `yaml:"fix"`
+	Note     string             `yaml:"note"`
+	Once     bool               `yaml:"once"`     // collapse all matching rows into one finding / one command
+	Platform string             `yaml:"platform"` // darwin | linux | "" (any)
+
+	whereRe map[string]*regexp.Regexp
+}
+
+type HostVersion struct {
+	Column    string `yaml:"column"`
+	Table     string `yaml:"table"`
+	LineParts int    `yaml:"line_parts"`
+	PinParts  int    `yaml:"pin_parts"`
+}
+
+type HostFix struct {
+	Command string `yaml:"command"` // shell command; empty means manual
+	Sudo    bool   `yaml:"sudo"`    // never run automatically; printed for the user
+	Manual  string `yaml:"manual"`  // text for the user (used when Command is empty or Sudo)
 }
 
 type Probe struct {
@@ -194,14 +226,14 @@ func (p *Pack) compile() error {
 				return fmt.Errorf("%s: content needs any", d.ID)
 			}
 			for _, s := range d.Any {
-				if strings.HasPrefix(s, "re:") {
-					r, err := regexp.Compile(strings.TrimPrefix(s, "re:"))
+				if after, ok := strings.CutPrefix(s, "re:"); ok {
+					r, err := regexp.Compile(after)
 					if err != nil {
 						return fmt.Errorf("%s: %w", d.ID, err)
 					}
 					d.anyRe = append(d.anyRe, r)
-				} else if strings.HasPrefix(s, "$") {
-					lst, ok := p.Strings[strings.TrimPrefix(s, "$")]
+				} else if after, ok := strings.CutPrefix(s, "$"); ok {
+					lst, ok := p.Strings[after]
 					if !ok {
 						return fmt.Errorf("%s: strings list %s not defined", d.ID, s)
 					}
@@ -249,7 +281,63 @@ func (p *Pack) compile() error {
 			}
 		}
 	}
+	for i := range p.Host {
+		h := &p.Host[i]
+		if h.ID == "" || h.Table == "" {
+			return fmt.Errorf("host[%d]: id and table are required", i)
+		}
+		h.whereRe = map[string]*regexp.Regexp{}
+		for col, v := range h.Where {
+			if after, ok := strings.CutPrefix(v, "re:"); ok {
+				r, err := regexp.Compile(after)
+				if err != nil {
+					return fmt.Errorf("host %s: where[%s]: %w", h.ID, col, err)
+				}
+				h.whereRe[col] = r
+			}
+		}
+		if h.Version != nil {
+			if h.Version.Column == "" || h.Version.Table == "" {
+				return fmt.Errorf("host %s: version needs column and table", h.ID)
+			}
+			if _, ok := p.Versions[h.Version.Table]; !ok {
+				return fmt.Errorf("host %s: version table %q not in versions", h.ID, h.Version.Table)
+			}
+			if h.Version.LineParts == 0 {
+				h.Version.LineParts = 2
+			}
+			if h.Version.PinParts == 0 {
+				h.Version.PinParts = 3
+			}
+		}
+		for st, sv := range h.Severity {
+			if !validSev[sv] {
+				return fmt.Errorf("host %s: severity[%s]=%q invalid", h.ID, st, sv)
+			}
+		}
+	}
 	return nil
+}
+
+// WhereMatch reports whether a row satisfies every Where clause.
+func (h *HostCheck) WhereMatch(row map[string]string) bool {
+	for col, v := range h.Where {
+		if r, ok := h.whereRe[col]; ok {
+			if !r.MatchString(row[col]) {
+				return false
+			}
+		} else if row[col] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *HostCheck) SeverityFor(state string) string {
+	if s, ok := h.Severity[state]; ok {
+		return s
+	}
+	return "info"
 }
 
 func (d *Detector) allTables() []string {

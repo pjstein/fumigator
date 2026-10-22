@@ -33,7 +33,7 @@ func List(org string, includeArchived bool) ([]Repo, error) {
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("gh repo list %s: %v: %s", org, err, strings.TrimSpace(errb.String()))
+		return nil, fmt.Errorf("gh repo list %s: %w: %s", org, err, strings.TrimSpace(errb.String()))
 	}
 	var all, repos []Repo
 	if err := json.Unmarshal(out.Bytes(), &all); err != nil {
@@ -73,15 +73,19 @@ func Sync(repos []Repo, dest string, workers int, depth int, progress func(SyncR
 	if workers <= 0 {
 		workers = 6
 	}
-	os.MkdirAll(dest, 0o755)
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		out := make([]SyncResult, 0, len(repos))
+		for _, r := range repos {
+			out = append(out, SyncResult{r.Name, "failed", err})
+		}
+		return out
+	}
 	jobs := make(chan Repo)
 	var mu sync.Mutex
 	var results []SyncResult
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for r := range jobs {
 				res := syncOne(r, dest, depth)
 				mu.Lock()
@@ -91,7 +95,7 @@ func Sync(repos []Repo, dest string, workers int, depth int, progress func(SyncR
 					progress(res)
 				}
 			}
-		}()
+		})
 	}
 	for _, r := range repos {
 		jobs <- r
@@ -131,7 +135,7 @@ func run(name string, args ...string) error {
 	var errb bytes.Buffer
 	cmd.Stderr = &errb
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s %s: %v: %s", name, strings.Join(args, " "), err, strings.TrimSpace(errb.String()))
+		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(errb.String()))
 	}
 	return nil
 }

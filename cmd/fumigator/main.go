@@ -25,6 +25,7 @@ import (
 	"github.com/pjstein/fumigator/internal/findings"
 	"github.com/pjstein/fumigator/internal/fix"
 	"github.com/pjstein/fumigator/internal/gh"
+	"github.com/pjstein/fumigator/internal/host"
 	"github.com/pjstein/fumigator/internal/pack"
 )
 
@@ -39,6 +40,8 @@ func main() {
 		err = cmdScan(os.Args[2:])
 	case "fix":
 		err = cmdFix(os.Args[2:])
+	case "host":
+		err = cmdHost(os.Args[2:])
 	case "gh":
 		err = cmdGH(os.Args[2:])
 	case "pack":
@@ -62,6 +65,7 @@ func usage() {
   fumigator scan  --pack ID [--pack ID...] [--out DIR] [--org ORG] [--all] [--depth N] ROOT...
   fumigator fix   --pack ID --findings DIR [--apply] [--run-tools] [--pr] [--only name,..] [--skip name,..]
                   [--branch NAME] [--base BRANCH] [--body-only PATH --only NAME]
+  fumigator host  --pack ID [--pack ID...] [--apply] [--only id,..] [--venv-roots DIR,..] [--out DIR] [--tables]
   fumigator gh    sync --org ORG [--workers N] [--depth N] DEST
   fumigator pack  test [PACK...]
   fumigator pack  lint [PACK...]
@@ -109,7 +113,7 @@ func loadPacks(dir string, refs []string) ([]*pack.Pack, error) {
 func cmdList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	pd := packsDir(fs)
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError: never returns an error
 	ents, err := os.ReadDir(*pd)
 	if err != nil {
 		return err
@@ -138,7 +142,7 @@ func cmdScan(args []string) error {
 	depth := fs.Int("depth", 6, "max directory depth when looking for repos")
 	workers := fs.Int("workers", 8, "repos scanned concurrently")
 	pd := packsDir(fs)
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError
 	roots := fs.Args()
 	if len(roots) == 0 {
 		return fmt.Errorf("scan needs at least one ROOT")
@@ -176,7 +180,9 @@ func cmdScan(args []string) error {
 		fmt.Fprintf(os.Stderr, "org %s: %d repos, %d without a local checkout\n", *org, len(rs), len(orgMissing))
 	}
 
-	os.MkdirAll(*out, 0o755)
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		return err
+	}
 	writeLines(filepath.Join(*out, "repos.txt"), repos)
 	writeLines(filepath.Join(*out, "orphans.txt"), orphans)
 	if *org != "" {
@@ -214,7 +220,9 @@ func cmdScan(args []string) error {
 		}
 		sum := findings.Summary(p.ID, p.Title, reports, orphans, orgMissing)
 		sp := filepath.Join(*out, p.ID, "summary.md")
-		os.MkdirAll(filepath.Dir(sp), 0o755)
+		if err := os.MkdirAll(filepath.Dir(sp), 0o755); err != nil {
+			return err
+		}
 		if err := os.WriteFile(sp, []byte(sum), 0o644); err != nil {
 			return err
 		}
@@ -237,7 +245,7 @@ func cmdFix(args []string) error {
 	base := fs.String("base", "", "PR base branch (default: the branch checked out at apply time)")
 	bodyOnly := fs.String("body-only", "", "write the PR body for --only NAME to this path and exit (no git)")
 	pd := packsDir(fs)
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError
 	if *packRef == "" {
 		return fmt.Errorf("--pack is required")
 	}
@@ -319,7 +327,7 @@ func cmdFix(args []string) error {
 
 func set(csv string) map[string]bool {
 	m := map[string]bool{}
-	for _, s := range strings.Split(csv, ",") {
+	for s := range strings.SplitSeq(csv, ",") {
 		if s = strings.TrimSpace(s); s != "" {
 			m[s] = true
 		}
@@ -377,6 +385,129 @@ func printResult(res *fix.Result, applied bool) {
 	fmt.Println()
 }
 
+func cmdHost(args []string) error {
+	fs := flag.NewFlagSet("host", flag.ExitOnError)
+	var packs multi
+	fs.Var(&packs, "pack", "pack id or directory (repeatable)")
+	apply := fs.Bool("apply", false, "run the non-sudo fix commands (default: plan only)")
+	only := fs.String("only", "", "comma-separated check ids to include")
+	venvRoots := fs.String("venv-roots", "", "comma-separated dirs to search for Python venvs")
+	out := fs.String("out", "findings", "output directory for the host report")
+	dump := fs.Bool("tables", false, "print the collected tables and exit")
+	pd := packsDir(fs)
+	_ = fs.Parse(args) // ExitOnError
+	ps, err := loadPacks(*pd, packs)
+	if err != nil {
+		return err
+	}
+	var bad []string
+	for _, p := range ps {
+		bad = append(bad, p.Strings["bad_roots"]...)
+		bad = append(bad, p.Strings["bad_intermediates"]...)
+	}
+	var roots []string
+	if *venvRoots != "" {
+		roots = strings.Split(*venvRoots, ",")
+	}
+	t0 := time.Now()
+	tables := host.Collect(host.Options{VenvRoots: roots, BadRoots: bad})
+	fmt.Fprintf(os.Stderr, "collected %d tables in %.1fs\n", len(tables), time.Since(t0).Seconds())
+	if *dump {
+		names := make([]string, 0, len(tables))
+		for n := range tables {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			t := tables[n]
+			fmt.Printf("== %s (%d rows)%s\n", n, len(t.Rows), map[bool]string{true: "  ERROR: " + t.Err, false: ""}[t.Err != ""])
+			for _, r := range t.Rows {
+				var cells []string
+				for _, c := range t.Columns {
+					cells = append(cells, c+"="+r[c])
+				}
+				fmt.Println("  " + strings.Join(cells, "  "))
+			}
+		}
+		return nil
+	}
+	inc := set(*only)
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		return err
+	}
+	for _, p := range ps {
+		fmt.Printf("== %s on %s (%s)\n", p.ID, host.Hostname(), map[bool]string{true: "APPLY", false: "plan"}[*apply])
+		fs, acts := host.Evaluate(p, tables)
+		if len(inc) > 0 {
+			var f2 []host.Finding
+			var a2 []host.Action
+			for i, a := range acts {
+				if inc[a.Finding.Detector] {
+					f2 = append(f2, fs[i])
+					a2 = append(a2, a)
+				}
+			}
+			fs, acts = f2, a2
+		}
+		var logb strings.Builder
+		logf := func(s string) { logb.WriteString(s + "\n") }
+		if *apply {
+			acts = host.Apply(acts, logf)
+		}
+		nRun, nManual, nFail := 0, 0, 0
+		for _, a := range acts {
+			f := a.Finding
+			switch {
+			case a.Sudo:
+				nManual++
+				fmt.Printf("  SUDO    [%s] %s: %s (%s)\n          $ %s\n          %s\n", f.Severity, f.Detector, f.Current, f.State, a.Command, a.Manual)
+			case a.Command == "":
+				nManual++
+				fmt.Printf("  TODO    [%s] %s: %s (%s) %s\n", f.Severity, f.Detector, f.Current, f.State, a.Manual)
+			case a.Err != "":
+				nFail++
+				fmt.Printf("  FAILED  [%s] %s: %s -> %s\n          $ %s\n          %s\n", f.Severity, f.Detector, f.Current, f.Fixed, a.Command, a.Err)
+			case a.Ran:
+				nRun++
+				fmt.Printf("  RAN     [%s] %s: %s -> %s\n          $ %s\n", f.Severity, f.Detector, f.Current, f.Fixed, a.Command)
+			default:
+				fmt.Printf("  PLAN    [%s] %s: %s -> %s\n          $ %s\n", f.Severity, f.Detector, f.Current, f.Fixed, a.Command)
+			}
+		}
+		probes := host.Probe(p)
+		if len(probes) > 0 {
+			fmt.Println("  -- verify (a fixed client must fail to fetch the test page)")
+			for _, pr := range probes {
+				if pr.Passed {
+					fmt.Printf("  ok      %s\n", pr.ID)
+				} else {
+					fmt.Printf("  WARN    %s %s\n", pr.ID, pr.Detail)
+				}
+			}
+		}
+		rep := host.Report{Pack: p.ID, Host: host.Hostname(), When: time.Now().Format(time.RFC3339), Tables: tables, Findings: fs, Actions: acts, Probes: probes}
+		b, _ := json.MarshalIndent(rep, "", " ")
+		rp := filepath.Join(*out, p.ID, "host-"+host.Hostname()+".json")
+		if err := os.MkdirAll(filepath.Dir(rp), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(rp, b, 0o644); err != nil {
+			return err
+		}
+		if logb.Len() > 0 {
+			if err := os.WriteFile(filepath.Join(*out, p.ID, "host-"+host.Hostname()+".log"), []byte(logb.String()), 0o644); err != nil {
+				return err
+			}
+		}
+		if *apply {
+			fmt.Printf("  %d ran, %d failed, %d need you. Report: %s. Open a new terminal before re-running.\n\n", nRun, nFail, nManual, rp)
+		} else {
+			fmt.Printf("  %d commands planned, %d need you. Re-run with --apply. Report: %s\n\n", len(acts)-nManual, nManual, rp)
+		}
+	}
+	return nil
+}
+
 func cmdGH(args []string) error {
 	if len(args) < 1 || args[0] != "sync" {
 		return fmt.Errorf("usage: fumigator gh sync --org ORG DEST")
@@ -386,7 +517,7 @@ func cmdGH(args []string) error {
 	workers := fs.Int("workers", 6, "parallel clones")
 	depth := fs.Int("depth", 50, "clone depth")
 	archived := fs.Bool("archived", false, "include archived repos")
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // ExitOnError
 	if *org == "" || fs.NArg() != 1 {
 		return fmt.Errorf("usage: fumigator gh sync --org ORG DEST")
 	}
@@ -425,7 +556,7 @@ func cmdPack(args []string) error {
 	}
 	fs := flag.NewFlagSet("pack", flag.ExitOnError)
 	pd := packsDir(fs)
-	fs.Parse(args[1:])
+	_ = fs.Parse(args[1:]) // ExitOnError
 	refs := fs.Args()
 	if len(refs) == 0 {
 		ents, err := os.ReadDir(*pd)
@@ -473,13 +604,18 @@ func testPack(p *pack.Pack) error {
 		return fmt.Errorf("no testdata/repo fixture")
 	}
 	var files []string
-	filepath.Walk(repo, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
+	if err := filepath.WalkDir(repo, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
 			rel, _ := filepath.Rel(repo, path)
 			files = append(files, rel)
 		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("walk fixture: %w", err)
+	}
 	rep := engine.ScanFiles(p, repo, files, engine.Options{}, nil)
 	type key struct {
 		Detector, File        string
@@ -525,5 +661,7 @@ func testPack(p *pack.Pack) error {
 }
 
 func writeLines(path string, lines []string) {
-	os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, "fumigator:", err)
+	}
 }

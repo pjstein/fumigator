@@ -13,6 +13,8 @@ bin/fumigator scan --pack emudhra-ca-2026-10 --org my-org --out findings ~/sourc
 bin/fumigator gh sync --org my-org ~/source/my-org      # shallow-clone what's missing, fetch the rest
 bin/fumigator fix --pack php2shell-2026-10 --findings findings            # dry run: WOULD edit / WOULD run / MANUAL
 bin/fumigator fix --pack php2shell-2026-10 --findings findings --apply --run-tools --pr --only one-repo
+bin/fumigator host --pack emudhra-ca-2026-10 --pack php2shell-2026-10            # this machine: plan
+bin/fumigator host --pack emudhra-ca-2026-10 --apply                            # run the non-sudo fixes, then probe
 bin/fumigator pack test                # every pack against its fixture
 ```
 
@@ -34,14 +36,19 @@ packs/<id>/           pack.yaml + testdata/{repo,expected.json}
 skills/<id>-remediation/   agent briefs, one per vulnerability
 skills/pack-authoring/     how to write the next pack
 skills/ca-php-remediation/ previous Python scanner + remediator (superseded; kept for reference)
-emudhra/              per-Mac audit and remediation scripts
 ```
 
 ## Status (2026-10-22)
 
-Done: scan, fix (branch, rewrites, insertions, lockfile tools, commit, push, PR), gh sync,
-pack test/lint, two packs with fixtures, parity-checked against the Python scanner. Not done:
-`verify`, `host`, osv-scalibr for lockfiles. See the migration order in the architecture doc.
+Done: scan, fix (branch, rewrites, insertions, lockfile tools, commit, push, PR), host
+(collector tables, pack-driven checks and fixes, verification probes), gh sync, pack
+test/lint, two packs with fixtures. Not done: osv-scalibr for lockfiles, a `pack test` for
+host checks against recorded tables. `make test` runs golangci-lint (config in
+`.golangci.yml`), vet, unit tests and the pack fixtures.
+
+`host` rules: plan only unless `--apply`; a `sudo: true` fix is printed, never run; each
+command runs once even when several rows need it; the pack's `verify` probes run after,
+and a client that still fetches the test page is reported as STILL TRUSTS.
 
 `fix` rules: dry run unless `--apply`; refuses a repo with modified tracked files; reuses the
 `sec/<pack-id>` branch; never force-pushes; never hand-edits a lockfile (a tool that is missing

@@ -2,14 +2,17 @@ BIN := bin/fumigator
 PKG := ./cmd/fumigator
 VERSION := $(shell date -u +%Y%m%d)
 
-.PHONY: all build test release clean
+.PHONY: all build lint test release clean
 
 all: build
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o $(BIN) $(PKG)
 
-test:
+lint:
+	golangci-lint run ./...
+
+test: lint
 	go vet ./...
 	go test ./...
 	$(BIN) pack test

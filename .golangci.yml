@@ -1,0 +1,26 @@
+version: "2"
+linters:
+  default: standard        # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - modernize            # gopls modernizers: range-over-int, min/max, slices.Contains, WaitGroup.Go, ...
+    - unparam
+    - misspell
+    - gocritic
+    - revive
+    - errorlint
+    - nilerr
+    - bodyclose
+  settings:
+    revive:
+      rules:
+        - name: unused-parameter
+        - name: exported
+          disabled: true
+    gocritic:
+      disabled-checks: [ifElseChain]
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck]
+formatters:
+  enable: [gofmt, goimports]

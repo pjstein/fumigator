@@ -138,3 +138,34 @@ verify:
   - id: php-version
     run: ["php", "-r", "echo PHP_VERSION;"]
     expect: {version_at_least: php}
+
+host:
+  - id: php-runtime
+    table: tools
+    where: {name: php}
+    version: {column: version, table: php}
+    severity: {vulnerable: critical, eol: critical}
+    fix:
+      vulnerable: {command: "brew upgrade $(brew list --formula | grep '^php' | tr '\\n' ' ') && (brew services restart php 2>/dev/null || true)", manual: "non-Homebrew PHP (Herd, MAMP, installer): update to {fixed} there"}
+      eol: {manual: "php {version} is on an EOL line with no PHP2Shell fix; install 8.3+ (brew install php@8.3)"}
+
+  - id: php-ini-upload-progress
+    table: php_ini
+    where: {upload_progress_enabled: "true"}
+    severity: {present: medium}
+    fix:
+      present: {manual: "{path} enables session.upload_progress; set it to 0 if PHP cannot be updated today, and restart every worker. php.net: only the update is complete."}
+
+  - id: composer
+    table: tools
+    where: {name: composer}
+    severity: {present: low}
+    fix:
+      present: {command: "composer self-update -q"}
+
+  - id: ddev
+    table: tools
+    where: {name: ddev}
+    severity: {present: low}
+    fix:
+      present: {command: "ddev self-upgrade"}

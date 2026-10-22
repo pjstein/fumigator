@@ -22,7 +22,7 @@ func Parse(v string) (parts []int, ok bool) {
 	if m == "" {
 		return nil, false
 	}
-	for _, p := range strings.Split(m, ".") {
+	for p := range strings.SplitSeq(m, ".") {
 		n, err := strconv.Atoi(p)
 		if err != nil {
 			return nil, false
@@ -69,7 +69,7 @@ func Line(v string, n int) string {
 		return ""
 	}
 	s := make([]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		s[i] = strconv.Itoa(p[i])
 	}
 	return strings.Join(s, ".")

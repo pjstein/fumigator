@@ -31,7 +31,7 @@ func Repos(roots []string, maxDepth int) ([]string, error) {
 		rootDepth := strings.Count(root, string(os.PathSeparator))
 		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // an unreadable entry is skipped, not fatal
 			}
 			if !d.IsDir() {
 				return nil
@@ -79,7 +79,7 @@ func Files(repo string) ([]string, error) {
 		return nil, &RepoError{Repo: repo, Err: err, Stderr: strings.TrimSpace(stderr.String())}
 	}
 	var out []string
-	for _, p := range bytes.Split(stdout.Bytes(), []byte{0}) {
+	for p := range bytes.SplitSeq(stdout.Bytes(), []byte{0}) {
 		if len(p) == 0 || installDir(string(p)) {
 			continue
 		}
@@ -92,7 +92,7 @@ func Files(repo string) ([]string, error) {
 // happens not to ignore (a repo with no .gitignore after `npm install`). Installs are not
 // source; the host and image fixes cover them.
 func installDir(rel string) bool {
-	for _, seg := range strings.Split(rel, "/") {
+	for seg := range strings.SplitSeq(rel, "/") {
 		switch seg {
 		case "node_modules", ".venv", "venv", "site-packages", "__pycache__", ".tox", ".cache":
 			return true
@@ -131,9 +131,10 @@ func Orphans(roots, repos []string, match func(rel string) bool) []string {
 		wg.Add(1)
 		go func(root string) {
 			defer wg.Done()
-			filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			// the callback never returns an error, so WalkDir cannot either
+			_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 				if err != nil {
-					return nil
+					return nil //nolint:nilerr // an unreadable entry is skipped, not fatal
 				}
 				if d.IsDir() {
 					if p != root && (SkipDirs[d.Name()] || d.Name() == ".git") {
@@ -172,7 +173,7 @@ func ReadLines(path string, max int64) (lines []string, ok bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only handle
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), int(max)+1)
 	for sc.Scan() {

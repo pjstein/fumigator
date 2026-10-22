@@ -61,6 +61,11 @@ with this brief:
 The orchestrator reads `findings/php2shell-2026-10/fix-log.md` (one section per repo and a
 summary table) and gives the user repo → PR → remaining manual items.
 
+## This machine
+
+`fumigator host --pack php2shell-2026-10 [--apply]` checks the installed PHP against the fixed
+versions, flags `session.upload_progress.enabled` in any loaded ini, and updates Composer.
+
 ## Verify
 
 `php -v` on the host must show a fixed version. For an image: build with `--pull --no-cache`

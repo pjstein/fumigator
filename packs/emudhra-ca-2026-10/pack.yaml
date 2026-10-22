@@ -23,6 +23,12 @@ versions:
   erlang-certifi: {"*": "pending"}
   electron: {"42": "42.11.16", "43": "43.8.1", "44": "44.9.1"}
   bun: {"*": "pending"}
+  brew-ca-certificates: {"*": "2026.09.25.1"}
+  uv: {"*": "0.13.4"}
+  pixi: {"*": "0.82.1"}
+  rustup: {"*": "1.29.2"}
+  mise: {"*": "2026.10.17"}
+  claude: {"*": "2.1.303"}
 eol:
   node: ["14", "16", "18", "19", "20", "21", "23", "25"]
   go: ["1.20", "1.21", "1.22", "1.23", "1.24", "1.25"]
@@ -328,11 +334,17 @@ detectors:
     note: "Heroku-style runtime; certifi comes from requirements."
 
 verify:
+  - id: curl-system-rejects
+    run: ["/usr/bin/curl", "-sSf", "--max-time", "10", "https://dv-g3b-emudhra.we-have-a-problem.com/"]
+    expect: {fails: true}
   - id: curl-rejects-emudhra-root
     run: ["curl", "-sSf", "--max-time", "10", "https://dv-g3b-emudhra.we-have-a-problem.com/"]
     expect: {fails: true}
   - id: curl-rejects-aaa-cross-sign
     run: ["curl", "-sSf", "--max-time", "10", "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/"]
+    expect: {fails: true}
+  - id: git-rejects
+    run: ["git", "ls-remote", "https://dv-g3b-emudhra.we-have-a-problem.com/"]
     expect: {fails: true}
   - id: node-rejects
     run: ["node", "-e", "fetch('https://dv-g3b-emudhra.we-have-a-problem.com/').then(()=>process.exit(0),()=>process.exit(1))"]
@@ -340,3 +352,251 @@ verify:
   - id: python-certifi-rejects
     run: ["python3", "-c", "import ssl,certifi,urllib.request as u; u.urlopen('https://dv-g3b-emudhra.we-have-a-problem.com/',timeout=10,context=ssl.create_default_context(cafile=certifi.where()))"]
     expect: {fails: true}
+  - id: ruby-rejects
+    run: ["ruby", "-ropen-uri", "-e", "URI.open('https://dv-g3b-emudhra.we-have-a-problem.com/').read"]
+    expect: {fails: true}
+  - id: go-rejects
+    run: ["sh", "-c", "d=$(mktemp -d) && cd $d && go mod init x >/dev/null 2>&1 && printf 'package main\nimport \"net/http\"\nfunc main(){ if _,e:=http.Get(\"https://dv-g3b-emudhra.we-have-a-problem.com/\"); e!=nil { panic(e) } }' > m.go && go run m.go"]
+    expect: {fails: true}
+  - id: java-rejects
+    run: ["sh", "-c", "command -v java >/dev/null || exit 1; d=$(mktemp -d) && cd $d && printf 'public class T{public static void main(String[] a)throws Exception{new java.net.URL(\"https://dv-g3b-emudhra.we-have-a-problem.com/\").openStream().close();}}' > T.java && java T.java"]
+    expect: {fails: true}
+  - id: deno-rejects
+    run: ["deno", "eval", "await fetch('https://dv-g3b-emudhra.we-have-a-problem.com/')"]
+    expect: {fails: true}
+  - id: bun-rejects
+    run: ["bun", "-e", "await fetch('https://dv-g3b-emudhra.we-have-a-problem.com/')"]
+    expect: {fails: true}
+  - id: not-over-blocked
+    run: ["curl", "-sSf", "--max-time", "10", "-o", "/dev/null", "https://github.com/"]
+    expect: {}
+
+# ---- this machine: collector tables queried like osquery; see internal/host/collect.go for columns ----
+
+host:
+  - id: system-updates
+    table: system
+    where: {pending_updates: "true"}
+    severity: {present: medium}
+    fix:
+      present: {manual: "macOS updates are pending. System Settings > General > Software Update, then restart."}
+
+  - id: apple-bundle-bad-roots
+    table: ca_bundles
+    where: {owner: apple, bad_roots: "re:."}
+    severity: {present: high}
+    fix:
+      present:
+        sudo: true
+        command: "sudo cp -p /etc/ssl/cert.pem /etc/ssl/cert.pem.bak && sudo awk '/^(###|===) /{skip=0} /^=== .*\\/CN=(AAA Certificate Services|emSign ECC Root CA - G3)$/{skip=1} !skip' /etc/ssl/cert.pem.bak | sudo tee /etc/ssl/cert.pem >/dev/null"
+        manual: "Apple's curl/git/python3/perl/ruby/openssl read /etc/ssl/cert.pem; strip the two roots (backup at cert.pem.bak)."
+
+  - id: certifi-bundle-bad-roots
+    table: ca_bundles
+    where: {owner: "re:^certifi", bad_roots: "re:."}
+    severity: {present: high}
+    fix:
+      present: {command: "python3 -m pip install -q -U certifi", manual: "the certifi bundle python3 uses still lists the compromised roots"}
+
+  - id: brew-ca-certificates
+    table: brew_packages
+    where: {name: ca-certificates}
+    version: {column: version, table: brew-ca-certificates}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "brew update && brew upgrade ca-certificates openssl@3 curl git"}
+
+  - id: nvm-node
+    table: node_installs
+    where: {manager: nvm, superseded: "false"}
+    version: {column: version, table: node, line_parts: 1}
+    severity: {vulnerable: high, eol: high}
+    fix:
+      vulnerable: {command: ". \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm install {fixed} && nvm alias default {fixed}"}
+      eol: {manual: "nvm uninstall {version} once no repo pins Node {major} (the repo scan lists the pins)."}
+
+  - id: nvm-node-superseded
+    table: node_installs
+    where: {manager: nvm, superseded: "true"}
+    version: {column: version, table: node, line_parts: 1}
+    severity: {vulnerable: low, eol: low}
+    fix:
+      vulnerable: {manual: "a fixed Node {major} is installed beside {version}; nvm uninstall {version} once nothing on this machine still selects it"}
+      eol: {manual: "an older build of EOL Node {major}; nvm uninstall {version}"}
+
+  - id: fnm-volta-brew-node
+    table: node_installs
+    where: {manager: "re:^(fnm|volta|brew)$"}
+    version: {column: version, table: node, line_parts: 1}
+    severity: {vulnerable: high, eol: high}
+    fix:
+      vulnerable: {manual: "install Node {fixed} with {manager} and make it the default"}
+      eol: {manual: "Node {major} has no fixed release; move to 22/24/26 with {manager}"}
+
+  - id: python-no-ssl
+    table: python_installs
+    where: {ssl: "false", kind: "re:^(pyenv|venv)$"}
+    severity: {present: medium}
+    fix:
+      present: {manual: "{path} was built without the ssl module (cannot reach PyPI): pyenv uninstall it or rebuild the same minor at its latest patch, and recreate venvs that inherit it"}
+
+  - id: pyenv-certifi
+    table: python_installs
+    where: {kind: pyenv, ssl: "true", certifi: "re:."}
+    version: {column: certifi, table: certifi}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "'{path}' -m pip install -q -U certifi pip"}
+
+  - id: pyenv-pip
+    table: python_installs
+    where: {kind: "re:^(pyenv|venv)$", ssl: "true", pip: "re:.", version: "re:^3\\.(9|[1-9][0-9])\\."}
+    version: {column: pip, table: pip}
+    severity: {vulnerable: medium}
+    fix:
+      vulnerable: {command: "'{path}' -m pip install -q -U pip certifi"}
+    note: "pip vendors its own certifi copy; below the floor it trusts the chain when installing packages."
+
+  - id: pyenv-pip-old-python
+    table: python_installs
+    where: {kind: "re:^(pyenv|venv)$", ssl: "true", pip: "re:.", version: "re:^3\\.[0-8]\\."}
+    version: {column: pip, table: pip}
+    severity: {vulnerable: medium}
+    fix:
+      vulnerable: {manual: "Python {version} at {path} cannot run pip {fixed} (needs 3.9+); its pip keeps a stale vendored certifi. Retire the interpreter, or export PIP_CERT=/etc/ssl/cert.pem when using it."}
+
+  - id: venv-certifi
+    table: python_installs
+    where: {kind: venv, ssl: "true", certifi: "re:.", pip: "re:."}
+    version: {column: certifi, table: certifi}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "'{path}' -m pip install -q -U certifi pip"}
+    note: "uv/poetry venvs with no pip are skipped: certifi comes from the project lockfile (the repo scan covers it)."
+
+  - id: brew-python
+    table: python_installs
+    where: {kind: "re:^brew:", certifi: "re:."}
+    version: {column: certifi, table: certifi}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "brew upgrade $(brew list --formula | grep -E '^python@3' | tr '\\n' ' ')"}
+    note: "PEP 668 blocks pip in Homebrew Pythons; the formula ships the fixed certifi."
+
+  - id: conda-certifi
+    table: python_installs
+    where: {kind: conda, certifi: "re:."}
+    version: {column: certifi, table: certifi}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "conda update -y -n base certifi ca-certificates"}
+
+  - id: go-toolchain
+    table: tools
+    where: {name: go}
+    version: {column: version, table: go}
+    severity: {vulnerable: high, eol: high}
+    fix:
+      vulnerable: {command: "brew upgrade go || true; brew unlink go && brew link go; go env -w GOTOOLCHAIN=auto"}
+      eol: {manual: "go {version} is on an unsupported line; install {fixed} (brew install go or https://go.dev/dl/)"}
+    note: "On macOS Go uses the OS trust store; the fixed release matters for Linux builds, containers and CI. A persisted GOTOOLCHAIN pin overrides whatever is linked."
+
+  - id: rustup
+    table: tools
+    where: {name: rustup}
+    version: {column: version, table: rustup}
+    severity: {vulnerable: medium}
+    fix:
+      vulnerable: {command: "rustup self update && rustup update"}
+
+  - id: jdk-bad-roots
+    table: jdk_keystore_aliases
+    where: {alias: "re:(?i)emsigneccrootcag3|emsignroottlscag3|comodoaaa|aaa ?certificate ?services"}
+    severity: {present: high}
+    fix:
+      present: {command: "keytool -delete -cacerts -storepass changeit -alias '{alias}'"}
+    note: "emSign G1/G2 roots are left in place: root programs kept them. Other JDKs: /usr/libexec/java_home -V, repeat with JAVA_HOME set."
+
+  - id: rbenv
+    table: tools
+    where: {name: ruby, manager: "re:^(system|rbenv)$"}
+    severity: {present: low}
+    fix:
+      present: {manual: "rbenv rubies link their own openssl: rbenv install <same version> after brew upgrade openssl@3"}
+
+  - id: perl-mozilla-ca
+    table: tools
+    where: {name: cpanm}
+    severity: {present: low}
+    fix:
+      present: {command: "cpanm -q Mozilla::CA"}
+
+  - id: deno
+    table: tools
+    where: {name: deno}
+    version: {column: version, table: deno}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "deno upgrade"}
+
+  - id: uv
+    table: tools
+    where: {name: uv}
+    version: {column: version, table: uv}
+    severity: {vulnerable: medium}
+    fix:
+      vulnerable: {command: "uv self update || brew upgrade uv"}
+
+  - id: pixi
+    table: tools
+    where: {name: pixi}
+    version: {column: version, table: pixi}
+    severity: {vulnerable: medium}
+    fix:
+      vulnerable: {command: "pixi self-update"}
+
+  - id: mise
+    table: tools
+    where: {name: mise}
+    version: {column: version, table: mise}
+    severity: {vulnerable: medium}
+    fix:
+      vulnerable: {command: "mise self-update -y"}
+
+  - id: claude-code
+    table: tools
+    where: {name: claude}
+    version: {column: version, table: claude}
+    severity: {vulnerable: medium}
+    fix:
+      vulnerable: {command: "claude update"}
+
+  - id: bun
+    table: tools
+    where: {name: bun}
+    version: {column: version, table: bun}
+    severity: {unknown: high}
+    fix:
+      unknown: {manual: "Bun {version} has no fixed release (https://github.com/oven-sh/bun/pull/46159). Avoid it for public-internet fetches, or set NODE_EXTRA_CA_CERTS to a clean bundle."}
+
+  - id: elixir
+    table: tools
+    where: {name: elixir}
+    severity: {present: low}
+    fix:
+      present: {manual: "Elixir projects: mix deps.update castore (>= 1.0.22); erlang-certifi fix still pending"}
+
+  - id: electron-apps
+    table: electron_apps
+    version: {column: version, table: electron, line_parts: 1}
+    severity: {vulnerable: medium, eol: medium}
+    fix:
+      vulnerable: {manual: "{app} ships Electron {version}; update the app (needs >= {fixed})"}
+      eol: {manual: "{app} ships Electron {version}, a line with no fix; update the app to a 42+ build"}
+
+  - id: docker-desktop
+    table: tools
+    where: {name: docker}
+    severity: {present: low}
+    fix:
+      present: {manual: "Docker Desktop: check for updates; rebuild images from updated bases with --pull --no-cache"}

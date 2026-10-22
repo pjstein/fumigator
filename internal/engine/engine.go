@@ -4,6 +4,7 @@ package engine
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -95,9 +96,7 @@ func ScanFiles(p *pack.Pack, repo string, files []string, opt Options, rep *find
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range jobs {
 				fs, errs := scanFile(p, repo, j.rel, opt)
 				mu.Lock()
@@ -106,7 +105,7 @@ func ScanFiles(p *pack.Pack, repo string, files []string, opt Options, rep *find
 				rep.Files++
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	for _, f := range files {
 		if Matches(p, f) {
@@ -186,10 +185,7 @@ func classify(p *pack.Pack, d *pack.Detector, table, ver string) (state findings
 		return findings.OK, floor
 	}
 	parts := version.Parts(num)
-	lp := d.LineParts
-	if parts < lp {
-		lp = parts
-	}
+	lp := min(parts, d.LineParts)
 	line := version.Line(num, lp)
 	if p.IsEOL(table, line) {
 		return findings.EOL, ""
@@ -280,7 +276,7 @@ func regexVersion(p *pack.Pack, d *pack.Detector, lines []string) []findings.Fin
 	return out
 }
 
-func content(p *pack.Pack, d *pack.Detector, lines []string) []findings.Finding {
+func content(_ *pack.Pack, d *pack.Detector, lines []string) []findings.Finding {
 	var hits []string
 	first := 0
 	firstLine := ""
@@ -377,7 +373,7 @@ func pairCheck(p *pack.Pack, d *pack.Detector, name, ver string, ln int, line st
 	}, true
 }
 
-func absent(p *pack.Pack, d *pack.Detector, lines []string) []findings.Finding {
+func absent(_ *pack.Pack, d *pack.Detector, lines []string) []findings.Finding {
 	var out []findings.Finding
 	trig, req := d.TrigRe(), d.ReqRe()
 	var starts []int
@@ -391,13 +387,7 @@ func absent(p *pack.Pack, d *pack.Detector, lines []string) []findings.Finding {
 		if i+1 < len(starts) {
 			end = starts[i+1]
 		}
-		found := false
-		for _, l := range lines[s:end] {
-			if req.MatchString(l) {
-				found = true
-				break
-			}
-		}
+		found := slices.ContainsFunc(lines[s:end], req.MatchString)
 		state := findings.OK
 		if !found {
 			state = findings.Absent
@@ -412,12 +402,7 @@ func absent(p *pack.Pack, d *pack.Detector, lines []string) []findings.Finding {
 }
 
 func contains(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, s)
 }
 
 func firstNonEmpty(xs ...string) string {
