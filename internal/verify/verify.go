@@ -208,21 +208,39 @@ func checkout(repo, branch string) error {
 	return nil
 }
 
+// build runs docker build with the Dockerfile's directory as context and, when that fails on a
+// missing path (the usual sign the project builds with the repository root as context),
+// once more from the root.
 func build(repo, df, tag string, timeout time.Duration) Step {
 	if timeout == 0 {
 		timeout = 15 * time.Minute
 	}
+	// the build cache from --no-cache --pull builds adds up fast; drop it every time
+	defer func() { _ = exec.Command("docker", "builder", "prune", "-af").Run() }()
+	st, out := buildIn(repo, df, tag, filepath.Join(repo, filepath.Dir(df)), timeout)
+	if !st.Passed && st.Ran && filepath.Dir(df) != "." && contextError(out) {
+		st2, _ := buildIn(repo, df, tag, repo, timeout)
+		if st2.Passed || !contextError(out) {
+			st2.Detail += " (repository root as build context)"
+			return st2
+		}
+	}
+	return st
+}
+
+func contextError(out string) bool {
+	return strings.Contains(out, "failed to compute cache key") || strings.Contains(out, "failed to calculate checksum") || strings.Contains(out, ": not found")
+}
+
+func buildIn(repo, df, tag, contextDir string, timeout time.Duration) (Step, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	dir := filepath.Join(repo, filepath.Dir(df))
-	c := exec.CommandContext(ctx, "docker", "build", "--pull", "--no-cache", "-f", filepath.Join(repo, df), "-t", tag, dir)
+	c := exec.CommandContext(ctx, "docker", "build", "--pull", "--no-cache", "-f", filepath.Join(repo, df), "-t", tag, contextDir)
 	var out bytes.Buffer
 	c.Stdout, c.Stderr = &out, &out
 	start := time.Now()
 	err := c.Run()
 	st := Step{Item: buildItem(df), Ran: true}
-	// the build cache from --no-cache --pull builds adds up fast; drop it every time
-	defer func() { _ = exec.Command("docker", "builder", "prune", "-af").Run() }()
 	if err != nil {
 		tail := strings.Join(strings.Fields(lastLines(out.String(), 6)), " ")
 		if len(tail) > 300 {
@@ -235,14 +253,14 @@ func build(repo, df, tag string, timeout time.Duration) Step {
 			// the host ran out of disk: not a verdict on the Dockerfile
 			st.Ran = false
 			st.Detail = "not run: docker host out of disk (prune and re-run)"
-			return st
+			return st, out.String()
 		}
 		st.Detail = "build failed: " + tail
-		return st
+		return st, out.String()
 	}
 	st.Passed = true
 	st.Detail = fmt.Sprintf("built in %s", time.Since(start).Round(time.Second))
-	return st
+	return st, out.String()
 }
 
 // probe runs the first available TLS client inside the image against url. The image must
