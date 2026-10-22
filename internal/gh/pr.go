@@ -19,7 +19,7 @@ type PRState struct {
 	Checks  int
 	Failing []string
 	Pending []string
-	Action  string // ready | already-ready | left-draft | failed
+	Action  string // ready | already-ready | left-draft | merged | closed | failed
 	Err     string
 }
 
@@ -65,7 +65,7 @@ func Ready(url string, allowNoChecks bool) PRState {
 	_ = json.Unmarshal(out, &view)
 	st.Draft = view.IsDraft
 	if view.State != "OPEN" {
-		st.Action, st.Err = "left-draft", strings.ToLower(view.State)
+		st.Action = strings.ToLower(view.State) // merged | closed
 		return st
 	}
 	var checks []struct{ Name, State string }

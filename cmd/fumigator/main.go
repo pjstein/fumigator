@@ -643,7 +643,7 @@ func cmdPR(args []string) error {
 			fmt.Printf("  draft        %s  (%s)\n", r.URL, why)
 		}
 	}
-	fmt.Printf("ready now: %d  already ready: %d  left draft: %d  failed: %d\n", counts["ready"], counts["already-ready"], counts["left-draft"], counts["failed"])
+	fmt.Printf("ready now: %d  already ready: %d  left draft: %d  merged: %d  closed: %d  failed: %d\n", counts["ready"], counts["already-ready"], counts["left-draft"], counts["merged"], counts["closed"], counts["failed"])
 	return nil
 }
 
