@@ -14,7 +14,8 @@ import (
 //	apple, brew, distro, nix        the OS or package manager bundle
 //	certifi:<interpreter kind>      a Python certifi package (fixed by the python_installs checks)
 //	pip-vendor                      pip's private certifi copy (fixed by upgrading pip)
-//	gcloud, aws-cli                 SDK-bundled bundles
+//	gcloud, aws-cli                 SDK-bundled bundles; gcloud:unused when custom_ca_certs_file
+//	                                points elsewhere, gcloud:custom for that file
 //	app:<name>                      a file inside an .app bundle (fixed by updating the app)
 //	conda:<env>                     a conda environment's ssl/ bundle
 type caBundles struct{}
@@ -43,8 +44,19 @@ func (caBundles) Collect(opt table.Options) ([]table.Row, error) {
 		cands[out] = "certifi:python3"
 	}
 	if root, ok := table.Sh("gcloud", "info", "--format=value(installation.sdk_root)"); ok && root != "" {
+		// with core/custom_ca_certs_file set, gcloud reads that file instead of its bundles
+		owner := "gcloud"
+		// gcloud prints "Your active configuration is: [x]" on stderr before the value
+		custom, ok := table.Sh("gcloud", "config", "get", "core/custom_ca_certs_file")
+		if lines := strings.Split(custom, "\n"); ok && len(lines) > 0 {
+			custom = strings.TrimSpace(lines[len(lines)-1])
+		}
+		if ok && custom != "" && custom != "(unset)" && table.Exists(custom) {
+			owner = "gcloud:unused"
+			cands[custom] = "gcloud:custom"
+		}
 		for _, rel := range []string{"lib/third_party/certifi/cacert.pem", "lib/third_party/botocore/cacert.pem", "platform/bq/third_party/certifi/cacert.pem", "platform/gsutil/third_party/certifi/certifi/cacert.pem"} {
-			cands[filepath.Join(root, rel)] = "gcloud"
+			cands[filepath.Join(root, rel)] = owner
 		}
 	}
 	// bundles inside .app packages and conda envs: walk, depth-limited, skipping caches and tests

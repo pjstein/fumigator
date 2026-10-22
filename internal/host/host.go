@@ -302,7 +302,7 @@ func NeedsYou(p *pack.Pack, acts []Action, applied bool) string {
 	if n == 0 {
 		return ""
 	}
-	return fmt.Sprintf("#!/usr/bin/env bash\n# %s on %s: %d item(s) fumigator did not run. Read each reason, delete what you don't want, then run.\nset -x\n\n", p.ID, Hostname(), n) + b.String()
+	return fmt.Sprintf("#!/usr/bin/env bash\n# %s on %s: %d item(s) fumigator did not run. Read each reason, delete what you don't want, then run.\n# Copy it first if you will run fumigator host again meanwhile: a re-run replaces this file.\nset -x\n\n", p.ID, Hostname(), n) + b.String()
 }
 
 func Hostname() string { h, _ := os.Hostname(); return h }

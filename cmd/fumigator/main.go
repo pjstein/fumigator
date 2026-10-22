@@ -486,7 +486,7 @@ func cmdHost(args []string) error {
 			if err := os.MkdirAll(filepath.Dir(sp), 0o755); err != nil {
 				return err
 			}
-			if err := os.WriteFile(sp, []byte(script), 0o755); err != nil {
+			if err := writeAtomic(sp, []byte(script), 0o755); err != nil {
 				return err
 			}
 			fmt.Printf("  -- needs you: commands and reasons (also saved to %s)\n", sp)
@@ -511,11 +511,11 @@ func cmdHost(args []string) error {
 		if err := os.MkdirAll(filepath.Dir(rp), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(rp, b, 0o644); err != nil {
+		if err := writeAtomic(rp, b, 0o644); err != nil {
 			return err
 		}
 		if logb.Len() > 0 {
-			if err := os.WriteFile(filepath.Join(*out, p.ID, "host-"+host.Hostname()+".log"), []byte(logb.String()), 0o644); err != nil {
+			if err := writeAtomic(filepath.Join(*out, p.ID, "host-"+host.Hostname()+".log"), []byte(logb.String()), 0o644); err != nil {
 				return err
 			}
 		}
@@ -678,6 +678,16 @@ func testPack(p *pack.Pack) error {
 		return fmt.Errorf("\n  %s", strings.Join(problems, "\n  "))
 	}
 	return nil
+}
+
+// writeAtomic replaces path in one rename, so a bash script being executed from the old
+// file keeps reading the old inode instead of a half-written new one.
+func writeAtomic(path string, b []byte, mode os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func writeLines(path string, lines []string) {

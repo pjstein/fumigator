@@ -112,7 +112,8 @@ type HostCheck struct {
 	Once     bool               `yaml:"once"`     // collapse all matching rows into one finding / one command
 	Platform string             `yaml:"platform"` // darwin | linux | "" (any)
 
-	whereRe map[string]*regexp.Regexp
+	whereRe  map[string]*regexp.Regexp
+	whereNot map[string]*regexp.Regexp
 }
 
 type HostVersion struct {
@@ -320,9 +321,16 @@ func (p *Pack) compile() error {
 	return nil
 }
 
-// WhereMatch reports whether a row satisfies every Where clause.
+// WhereMatch reports whether a row satisfies every Where clause: a literal, "re:" (must
+// match) or "!re:" (must not match).
 func (h *HostCheck) WhereMatch(row map[string]string) bool {
 	for col, v := range h.Where {
+		if r, ok := h.whereNot[col]; ok {
+			if r.MatchString(row[col]) {
+				return false
+			}
+			continue
+		}
 		if r, ok := h.whereRe[col]; ok {
 			if !r.MatchString(row[col]) {
 				return false

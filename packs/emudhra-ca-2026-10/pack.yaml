@@ -400,11 +400,11 @@ host:
 
   - id: gcloud-bundles
     table: ca_bundles
-    where: {owner: gcloud, bad_roots: "re:."}
+    where: {owner: "re:^gcloud(:custom)?$", bad_roots: "re:."}
     once: true
     severity: {present: high}
     fix:
-      present: {command: "gcloud components update --quiet", manual: "the gcloud SDK ships its own certifi/botocore bundles; a component update replaces them (re-run to confirm)"}
+      present: {command: "gcloud config set core/custom_ca_certs_file /etc/ssl/cert.pem", manual: "the gcloud SDK ships its own certifi/botocore bundles and `gcloud components update` does not refresh them; pointing core/custom_ca_certs_file at the cleaned system bundle makes gcloud, gsutil and bq use that instead"}
 
   - id: aws-cli-bundle
     table: ca_bundles
@@ -422,11 +422,18 @@ host:
 
   - id: conda-env-bundle
     table: ca_bundles
-    where: {owner: "re:^conda:", bad_roots: "re:."}
+    where: {owner: "re:^conda:", path: "!re:/R/library/openssl/", bad_roots: "re:."}
     once: true
     severity: {present: high}
     fix:
       present: {command: "for e in $(conda env list 2>/dev/null | awk 'NR>2 && $1!=\"\" {print $1}'); do conda update -y -n \"$e\" ca-certificates certifi; done", manual: "a conda environment's ssl bundle still lists the roots ({owner} at {path}); every env gets ca-certificates and certifi updated"}
+
+  - id: conda-r-openssl-bundle
+    table: ca_bundles
+    where: {owner: "re:^conda:", path: "re:/R/library/openssl/", bad_roots: "re:."}
+    severity: {present: low}
+    fix:
+      present: {suggest: "conda update -y -n \"$(echo '{owner}' | cut -d: -f2)\" r-openssl", manual: "R's openssl package carries a fallback cacert.pem at {path}; on macOS R uses the system store unless CURL_CA_BUNDLE points here. Update the package when conda-forge rebuilds it."}
 
   - id: app-bundle
     table: ca_bundles
@@ -577,8 +584,8 @@ host:
     version: {column: certifi, table: certifi}
     severity: {vulnerable: high}
     fix:
-      vulnerable: {command: "uv tool upgrade {name}"}
-    note: "uv tool environments have no pip; uv re-resolves the tool's dependencies, certifi included."
+      vulnerable: {command: "uv tool install --reinstall --with 'certifi>={fixed}' {name}"}
+    note: "uv tool environments have no pip; reinstalling with a certifi floor re-resolves it. If this fails, the tool pins an older certifi upstream: report it there and run the tool with SSL_CERT_FILE=/etc/ssl/cert.pem meanwhile."
 
   - id: pipx-certifi
     table: python_installs
@@ -586,7 +593,8 @@ host:
     version: {column: certifi, table: certifi}
     severity: {vulnerable: high}
     fix:
-      vulnerable: {command: "pipx upgrade {name}"}
+      vulnerable: {command: "pipx runpip {name} install -q -U certifi"}
+    note: "pipx upgrade only upgrades the app, not its dependencies; runpip reaches the venv's pip."
 
   - id: go-toolchain
     table: tools
