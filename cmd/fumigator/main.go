@@ -29,6 +29,7 @@ import (
 	"github.com/pjstein/fumigator/internal/gh"
 	"github.com/pjstein/fumigator/internal/host"
 	"github.com/pjstein/fumigator/internal/pack"
+	"github.com/pjstein/fumigator/internal/verify"
 )
 
 // version is set by goreleaser (-X main.version=...).
@@ -79,7 +80,9 @@ func usage() {
                   [--branch NAME] [--base BRANCH] [--body-only PATH --only NAME]
   fumigator host  --pack ID [--pack ID...] [--apply] [--only id,..] [--venv-roots DIR,..] [--out DIR] [--tables]
   fumigator gh    sync --org ORG [--workers N] [--depth N] DEST
-  fumigator pr    ready --pack ID --findings DIR [--no-checks]   un-draft PRs from fix-log.md whose checks all pass
+  fumigator pr    ready  --pack ID --findings DIR [--no-checks]   un-draft PRs from fix-log.md whose checks all pass
+  fumigator pr    verify --pack ID --findings DIR [--only name,..] [--ready] [--build-timeout 15m]
+                  run each green PR's verify checklist (docker build of touched Dockerfiles, in-image probe) and tick it
   fumigator pack  test [PACK...]
   fumigator pack  lint [PACK...]
   fumigator list
@@ -588,8 +591,11 @@ func cmdHost(args []string) error {
 }
 
 func cmdPR(args []string) error {
+	if len(args) >= 1 && args[0] == "verify" {
+		return cmdPRVerify(args[1:])
+	}
 	if len(args) < 1 || args[0] != "ready" {
-		return fmt.Errorf("usage: fumigator pr ready --pack ID --findings DIR [--no-checks]")
+		return fmt.Errorf("usage: fumigator pr ready|verify --pack ID --findings DIR")
 	}
 	fs := flag.NewFlagSet("pr ready", flag.ExitOnError)
 	packRef := fs.String("pack", "", "pack id")
@@ -638,6 +644,82 @@ func cmdPR(args []string) error {
 		}
 	}
 	fmt.Printf("ready now: %d  already ready: %d  left draft: %d  failed: %d\n", counts["ready"], counts["already-ready"], counts["left-draft"], counts["failed"])
+	return nil
+}
+
+func cmdPRVerify(args []string) error {
+	fs := flag.NewFlagSet("pr verify", flag.ExitOnError)
+	packRef := fs.String("pack", "", "pack id")
+	dir := fs.String("findings", "findings", "findings directory holding <pack>/fix-log.md and the per-repo reports")
+	only := fs.String("only", "", "comma-separated report names to include")
+	ready := fs.Bool("ready", false, "mark a PR ready for review when every step passes")
+	timeout := fs.Duration("build-timeout", 15*time.Minute, "per docker build")
+	pd := packsDir(fs)
+	_ = fs.Parse(args) // ExitOnError
+	if *packRef == "" {
+		return fmt.Errorf("--pack is required")
+	}
+	p, err := pack.Find(*pd, *packRef)
+	if err != nil {
+		return err
+	}
+	// report name -> local checkout, from the scan reports
+	repoDir := map[string]string{}
+	reports, _ := filepath.Glob(filepath.Join(*dir, p.ID, "*.json"))
+	for _, rp := range reports {
+		if rep, err := findings.Read(rp); err == nil {
+			repoDir[filepath.Base(rep.Repo)] = rep.Repo
+			repoDir[strings.TrimSuffix(filepath.Base(rp), ".json")] = rep.Repo
+		}
+	}
+	urls, err := gh.PRsFromLog(filepath.Join(*dir, p.ID, "fix-log.md"))
+	if err != nil {
+		return err
+	}
+	inc := set(*only)
+	var log strings.Builder
+	fmt.Fprintf(&log, "# verify log — %s — %s\n\n", p.ID, time.Now().Format("2006-01-02 15:04"))
+	counts := map[string]int{}
+	for _, u := range urls {
+		name := filepath.Base(strings.Split(u, "/pull/")[0])
+		if len(inc) > 0 && !inc[name] {
+			continue
+		}
+		fmt.Printf("== %s  %s\n", name, u)
+		res := verify.Run(p, u, verify.Options{Repo: repoDir[name], BuildTimeout: *timeout, Ready: *ready})
+		fmt.Fprintf(&log, "## %s  %s\n\n", name, u)
+		for _, st := range res.Steps {
+			mark := "skip"
+			switch {
+			case st.Ran && st.Passed:
+				mark = "pass"
+			case st.Ran:
+				mark = "FAIL"
+			}
+			fmt.Printf("  %-4s %s  (%s)\n", mark, st.Item, st.Detail)
+			fmt.Fprintf(&log, "- %s: %s (%s)\n", mark, st.Item, st.Detail)
+		}
+		switch {
+		case res.Err != "":
+			counts["error"]++
+			fmt.Printf("  ERROR %s\n", res.Err)
+			fmt.Fprintf(&log, "- error: %s\n", res.Err)
+		case res.Skipped != "":
+			counts["skipped"]++
+			fmt.Printf("  skipped: %s\n", res.Skipped)
+			fmt.Fprintf(&log, "- skipped: %s\n", res.Skipped)
+		case res.AllPassed():
+			counts["passed"]++
+		default:
+			counts["failed"]++
+		}
+		log.WriteString("\n")
+	}
+	lp := filepath.Join(*dir, p.ID, "verify-log.md")
+	if err := os.WriteFile(lp, []byte(log.String()), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("passed: %d  failed: %d  skipped: %d  error: %d  log: %s\n", counts["passed"], counts["failed"], counts["skipped"], counts["error"], lp)
 	return nil
 }
 

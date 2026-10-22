@@ -83,8 +83,16 @@ how to verify. A repo whose findings are all decisions gets the body written to
 `.git/PR_BODY.md` and no PR. `findings/<pack>/fix-log.md` maps repo to PR.
 
 ```bash
-fumigator pr ready --pack emudhra-ca-2026-10 --findings findings [--no-checks]   # un-draft PRs whose checks all pass
+fumigator pr verify --pack emudhra-ca-2026-10 --findings findings --ready   # run each green PR's checklist, tick it, un-draft on pass
+fumigator pr ready  --pack emudhra-ca-2026-10 --findings findings [--no-checks]   # un-draft PRs whose checks all pass
 ```
+
+`pr verify` works through the PR's own "Verify before merging" list: CI state, a
+`docker build --pull --no-cache` of every Dockerfile the PR touched, and the advisory's test
+hosts fetched from inside each built image (the image must fail). It ticks what passed and
+appends a dated "Verification run" section with each result; a failed build is also tried on
+the base branch so the body says whether the PR broke it or it was already broken. Re-runs
+replace the section.
 
 ## Packs
 

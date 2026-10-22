@@ -442,22 +442,63 @@ func Body(p *pack.Pack, name string, res *Result) string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("## Verify before merging\n\n- [ ] CI is green on this branch\n")
-	if len(res.Edits) > 0 {
-		b.WriteString("- [ ] `docker build --pull --no-cache` succeeds for any Dockerfile touched here\n")
-	}
-	for _, v := range p.Verify {
-		fmt.Fprintf(&b, "- [ ] `%s`", strings.Join(v.Run, " "))
-		if v.Expect.Fails {
-			b.WriteString(" fails (a certificate error is the good outcome)")
-		} else if v.Expect.VersionAtLeast != "" {
-			fmt.Fprintf(&b, " prints a version at or above the fixed %s release", v.Expect.VersionAtLeast)
-		}
-		b.WriteString("\n")
-	}
+	b.WriteString(VerifySection(p, res))
 	b.WriteString("\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n")
 	return b.String()
 }
+
+// VerifySection renders the "Verify before merging" checklist: CI, a build of each Dockerfile
+// the fix touched, and the advisory's test hosts probed from inside the built image.
+// `fumigator pr verify` runs these and ticks them.
+func VerifySection(p *pack.Pack, res *Result) string {
+	var b strings.Builder
+	b.WriteString("## Verify before merging\n\n- [ ] CI is green on this branch\n")
+	for _, df := range TouchedDockerfiles(res) {
+		fmt.Fprintf(&b, "- [ ] `%s` builds with `docker build --pull --no-cache`\n", df)
+	}
+	if len(TouchedDockerfiles(res)) > 0 {
+		for _, u := range ProbeURLs(p) {
+			fmt.Fprintf(&b, "- [ ] the built image rejects %s (a certificate error is the good outcome)\n", u)
+		}
+	}
+	return b.String()
+}
+
+// TouchedDockerfiles lists the Dockerfiles among the edits, in order.
+func TouchedDockerfiles(res *Result) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, e := range res.Edits {
+		base := strings.ToLower(filepath.Base(e.File))
+		if (strings.HasPrefix(base, "dockerfile") || strings.HasSuffix(base, ".dockerfile") || base == "containerfile") && !seen[e.File] {
+			seen[e.File] = true
+			out = append(out, e.File)
+		}
+	}
+	return out
+}
+
+// ProbeURLs returns the https test hosts from the pack's verify block (probes expected to fail).
+func ProbeURLs(p *pack.Pack) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range p.Verify {
+		if !v.Expect.Fails {
+			continue
+		}
+		for _, a := range v.Run {
+			for _, m := range urlRe.FindAllString(a, -1) {
+				if !seen[m] {
+					seen[m] = true
+					out = append(out, m)
+				}
+			}
+		}
+	}
+	return out
+}
+
+var urlRe = regexp.MustCompile(`https://[\w.-]+/?`)
 
 func (r *remediator) note(s string) {
 	if r.res.Note != "" {
