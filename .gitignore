@@ -1,5 +1,5 @@
 bin/
 dist/
-findings/
+/findings/
 skills/*.skill
 HANDOFF*.md
