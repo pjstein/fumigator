@@ -1,0 +1,210 @@
+[
+ {
+  "Detector": "vendored-ca-bundle",
+  "File": "certs/cacert.pem",
+  "Line": 4,
+  "State": "present",
+  "Current": "AAA Certificate Services",
+  "Fixed": ""
+ },
+ {
+  "Detector": "ci-go-version",
+  "File": ".github/workflows/ci.yml",
+  "Line": 3,
+  "State": "floating",
+  "Current": "1.26",
+  "Fixed": "1.26.10"
+ },
+ {
+  "Detector": "ci-node-version",
+  "File": ".github/workflows/ci.yml",
+  "Line": 6,
+  "State": "vulnerable",
+  "Current": "22.1.0",
+  "Fixed": "22.23.4"
+ },
+ {
+  "Detector": "node-pin",
+  "File": ".nvmrc",
+  "Line": 1,
+  "State": "eol",
+  "Current": "20",
+  "Fixed": ""
+ },
+ {
+  "Detector": "go-tool-versions",
+  "File": ".tool-versions",
+  "Line": 1,
+  "State": "vulnerable",
+  "Current": "1.27.1",
+  "Fixed": "1.27.3"
+ },
+ {
+  "Detector": "node-tool-versions",
+  "File": ".tool-versions",
+  "Line": 2,
+  "State": "vulnerable",
+  "Current": "24.1.0",
+  "Fixed": "24.22.1"
+ },
+ {
+  "Detector": "cargo-lock-webpki",
+  "File": "Cargo.lock",
+  "Line": 2,
+  "State": "vulnerable",
+  "Current": "webpki-roots 1.0.2",
+  "Fixed": "1.0.10"
+ },
+ {
+  "Detector": "runtime-image-tag",
+  "File": "Dockerfile",
+  "Line": 1,
+  "State": "vulnerable",
+  "Current": "golang:1.26.4-alpine",
+  "Fixed": "1.26.10"
+ },
+ {
+  "Detector": "node-image-line",
+  "File": "Dockerfile",
+  "Line": 3,
+  "State": "floating",
+  "Current": "node:22",
+  "Fixed": "22.23.4"
+ },
+ {
+  "Detector": "node-image-line",
+  "File": "Dockerfile",
+  "Line": 4,
+  "State": "eol",
+  "Current": "node:18-alpine",
+  "Fixed": ""
+ },
+ {
+  "Detector": "base-image-ca-upgrade",
+  "File": "Dockerfile",
+  "Line": 5,
+  "State": "absent",
+  "Current": "FROM alpine:3.20",
+  "Fixed": ""
+ },
+ {
+  "Detector": "builder-ca-copy",
+  "File": "Dockerfile",
+  "Line": 6,
+  "State": "present",
+  "Current": "COPY --from=build /etc/ssl/certs/ca-certificates.crt",
+  "Fixed": ""
+ },
+ {
+  "Detector": "bun-image",
+  "File": "Dockerfile",
+  "Line": 9,
+  "State": "present",
+  "Current": "FROM oven/bun:1.2",
+  "Fixed": ""
+ },
+ {
+  "Detector": "composer-lock-ca-bundle",
+  "File": "composer.lock",
+  "Line": 4,
+  "State": "vulnerable",
+  "Current": "composer/ca-bundle 1.4.12",
+  "Fixed": "1.4.16"
+ },
+ {
+  "Detector": "go-mod-toolchain",
+  "File": "go.mod",
+  "Line": 5,
+  "State": "vulnerable",
+  "Current": "1.26.4",
+  "Fixed": "1.26.10"
+ },
+ {
+  "Detector": "mix-lock-castore",
+  "File": "mix.lock",
+  "Line": 2,
+  "State": "vulnerable",
+  "Current": "castore 1.0.11",
+  "Fixed": "1.0.22"
+ },
+ {
+  "Detector": "package-json-engines-node",
+  "File": "package.json",
+  "Line": 3,
+  "State": "eol",
+  "Current": "18",
+  "Fixed": ""
+ },
+ {
+  "Detector": "package-json-electron",
+  "File": "package.json",
+  "Line": 6,
+  "State": "vulnerable",
+  "Current": "43.2.0",
+  "Fixed": "43.8.1"
+ },
+ {
+  "Detector": "certifi-pin",
+  "File": "requirements.txt",
+  "Line": 2,
+  "State": "vulnerable",
+  "Current": "2025.8.3",
+  "Fixed": "2026.10.19"
+ },
+ {
+  "Detector": "python-lock-certifi",
+  "File": "uv.lock",
+  "Line": 2,
+  "State": "vulnerable",
+  "Current": "certifi 2025.8.3",
+  "Fixed": "2026.10.19"
+ },
+ {
+  "Detector": "ci-bun-version",
+  "File": ".github/workflows/ci.yml",
+  "Line": 9,
+  "State": "present",
+  "Current": "bun-version:",
+  "Fixed": ""
+ },
+ {
+  "Detector": "go-mod-language-line",
+  "File": "go.mod",
+  "Line": 3,
+  "State": "eol",
+  "Current": "1.25",
+  "Fixed": ""
+ },
+ {
+  "Detector": "mix-lock-castore",
+  "File": "mix.lock",
+  "Line": 3,
+  "State": "unknown",
+  "Current": "certifi 2.15.0",
+  "Fixed": "pending"
+ },
+ {
+  "Detector": "package-json-bun",
+  "File": "package.json",
+  "Line": 7,
+  "State": "present",
+  "Current": "\"bun-types\":",
+  "Fixed": ""
+ },
+ {
+  "Detector": "certifi-unpinned",
+  "File": "constraints.txt",
+  "Line": 1,
+  "State": "present",
+  "Current": "certifi",
+  "Fixed": ""
+ },
+ {
+  "Detector": "heroku-runtime",
+  "File": "runtime.txt",
+  "Line": 1,
+  "State": "present",
+  "Current": "python-",
+  "Fixed": ""
+ }
+]

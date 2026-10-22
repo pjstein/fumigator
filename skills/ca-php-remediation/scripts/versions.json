@@ -1,0 +1,29 @@
+{
+  "_source": "https://emudhra.we-have-a-problem.com/#developers and https://www.php.net/archive/2026.php#2026-10-21-5, as of 2026-10-22. Edit this file when upstream changes; every script reads it.",
+  "node": {"22": "22.23.4", "24": "24.22.1", "26": "26.12.1"},
+  "node_eol": ["14", "16", "18", "19", "20", "21", "23", "25"],
+  "go": {"1.26": "1.26.10", "1.27": "1.27.3"},
+  "go_eol_below": "1.26",
+  "php": {"8.2": "8.2.35", "8.3": "8.3.36", "8.4": "8.4.27", "8.5": "8.5.12"},
+  "php_eol": ["5", "7.0", "7.1", "7.2", "7.3", "7.4", "8.0", "8.1"],
+  "certifi": "2026.10.19",
+  "pip": "26.2.2",
+  "uv": "0.13.4",
+  "webpki-roots": "1.0.10",
+  "webpki-root-certs": "1.0.10",
+  "rustls-webpki": "0.103.16",
+  "composer/ca-bundle": {"1.4": "1.4.16", "1.6": "1.6.0"},
+  "castore": "1.0.22",
+  "electron": {"42": "42.11.16", "43": "43.8.1", "44": "44.9.1"},
+  "deno": "2.9.8",
+  "bun": null,
+  "wordpress": {"6.9": "6.9.5", "7.0": "7.0.6", "7.1": "7.1.2"},
+  "images": {
+    "alpine": "20261020-r0",
+    "debian": "20250419~deb12u2 / 20250419+deb13u1",
+    "ubuntu": "20260816ubuntu0.*",
+    "chainguard": "20260909-r3"
+  },
+  "bad_roots": ["AAA Certificate Services", "emSign ECC Root CA - G3", "emSign Root TLS CA - G3"],
+  "bad_intermediates": ["EM DV TLS CA - G3B", "EM OV TLS CA - G3B", "EM EV TLS CA - G3B", "EM DV TLS CA - G3C", "EM OV TLS CA - G3C", "EM EV TLS CA - G3C", "EM OV CS CA - G3B", "EM OV CS CA - G3C"]
+}

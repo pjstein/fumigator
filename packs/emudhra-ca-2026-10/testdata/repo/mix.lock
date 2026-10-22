@@ -1,0 +1,4 @@
+%{
+  "castore": {:hex, :castore, "1.0.11", "abc", [:mix], [], "hexpm", "def"},
+  "certifi": {:hex, :certifi, "2.15.0", "abc", [:rebar3], [], "hexpm", "def"},
+}

@@ -1,0 +1,342 @@
+id: emudhra-ca-2026-10
+title: eMudhra intermediate CA compromise (emSign / Sectigo AAA cross-sign)
+advisory: https://emudhra.we-have-a-problem.com/#developers
+published: "2026-10-17"
+updated: "2026-10-22"
+summary: >
+  Eight eMudhra intermediate CAs had recoverable private keys. They chain to emSign ECC Root CA
+  G3 and, by cross-sign, to Sectigo AAA Certificate Services, and expire in 2040. Browsers are
+  fixed by revocation feeds; every other TLS client (runtimes, package managers, containers, Java
+  keystores, vendored bundles) needs an updated trust store or an SPKI denylist.
+
+versions:
+  node: {"22": "22.23.4", "24": "24.22.1", "26": "26.12.1"}
+  go: {"1.26": "1.26.10", "1.27": "1.27.3"}
+  deno: {"*": "2.9.8"}
+  certifi: {"*": "2026.10.19"}
+  pip: {"*": "26.2.2"}
+  webpki-roots: {"*": "1.0.10"}
+  webpki-root-certs: {"*": "1.0.10"}
+  rustls-webpki: {"*": "0.103.16"}
+  composer-ca-bundle: {"1.4": "1.4.16", "1.5": "1.6.0", "1.6": "1.6.0"}
+  castore: {"*": "1.0.22"}
+  erlang-certifi: {"*": "pending"}
+  electron: {"42": "42.11.16", "43": "43.8.1", "44": "44.9.1"}
+  bun: {"*": "pending"}
+eol:
+  node: ["14", "16", "18", "19", "20", "21", "23", "25"]
+  go: ["1.20", "1.21", "1.22", "1.23", "1.24", "1.25"]
+  electron: ["30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41"]
+
+strings:
+  bad_roots: ["AAA Certificate Services", "emSign ECC Root CA - G3", "emSign Root TLS CA - G3"]
+  bad_intermediates: ["EM DV TLS CA - G3B", "EM OV TLS CA - G3B", "EM EV TLS CA - G3B",
+                      "EM DV TLS CA - G3C", "EM OV TLS CA - G3C", "EM EV TLS CA - G3C",
+                      "EM OV CS CA - G3B", "EM OV CS CA - G3C"]
+
+detectors:
+  # ---- container base images: the runtime's own roots ----
+  - id: runtime-image-tag
+    type: regex-version
+    files: &imagefiles ["Dockerfile", "Dockerfile.*", "*.dockerfile", "Containerfile",
+            "docker-compose*.y*ml", "compose*.y*ml",
+            ".github/workflows/*.y*ml", ".gitlab-ci.yml", "bitbucket-pipelines.yml",
+            ".buildkite/*.y*ml", ".circleci/config.yml",
+            "**/k8s/**/*.y*ml", "**/kube/**/*.y*ml", "**/manifests/**/*.y*ml",
+            "**/deploy/**/*.y*ml", "**/charts/**/values*.y*ml"]
+    pattern: '^\s*(?:-\s*)?(?:FROM\s+(?:--platform=\S+\s+)?|(?:image|container):\s*["'']?)(?P<name>(?:[\w.-]+/)*(?:golang|go|denoland/deno)):(?P<version>[\w.+-]+)'
+    tables: {golang: go, go: go, deno: deno}
+    line_parts: 2
+    pin_parts: 3
+    skip: ["lts", "current", "latest", "alpine", "slim", "bookworm", "bullseye", "trixie"]
+    severity: {vulnerable: high, eol: high, floating: high, unknown: low}
+    fix:
+      vulnerable: {kind: rewrite, capture: numeric, to: "{fixed}"}
+      floating: {kind: rewrite, capture: numeric, to: "{fixed}"}
+      eol: {kind: manual}
+      unknown: {kind: manual}
+    note: "Go and Deno ignore the OS trust store in Linux containers; the fix is in the runtime binary. A floating tag can be satisfied by a cached old layer."
+
+  - id: node-image-line
+    # node tables are keyed by major, so node images need line_parts 1; split from the above
+    type: regex-version
+    files: *imagefiles
+    pattern: '^\s*(?:-\s*)?(?:FROM\s+(?:--platform=\S+\s+)?|(?:image|container):\s*["'']?)(?P<name>(?:[\w.-]+/)*node):(?P<version>\d[\w.+-]*)'
+    table: node
+    line_parts: 1
+    pin_parts: 3
+    severity: {vulnerable: high, eol: high, floating: high, unknown: low}
+    fix:
+      vulnerable: {kind: rewrite, capture: numeric, to: "{fixed}"}
+      floating: {kind: rewrite, capture: numeric, to: "{fixed}"}
+      eol: {kind: manual}
+      unknown: {kind: manual}
+
+  - id: bun-image
+    type: content
+    files: *imagefiles
+    any: ['re:^\s*(?:-\s*)?(?:FROM\s+|(?:image|container):\s*["'']?)oven/bun(?::\S+)?']
+    severity: {present: high}
+    fix: {present: {kind: manual}}
+    note: "Bun has no fixed release; mount a clean bundle via NODE_EXTRA_CA_CERTS or build with node."
+
+  - id: base-image-ca-upgrade
+    # a bare distro FROM with no ca-certificates step in the same stage
+    type: absent
+    files: ["Dockerfile", "Dockerfile.*", "*.dockerfile", "Containerfile"]
+    trigger: '(?i)^\s*FROM\s+(?:--platform=\S+\s+)?(?:[\w.-]+/)*(?:alpine|debian|ubuntu|python|pypy)(?::[^\s$]+)?(?:\s+AS\s+\S+)?\s*$'
+    require: '^\s*RUN\b.*(ca-certificates|update-ca-trust|update-ca-certificates|pip3?\s+install.*certifi)'
+    severity: {absent: high}
+    fix:
+      absent: {kind: insert-after, to: "RUN (apk upgrade --no-cache ca-certificates 2>/dev/null || (apt-get update && apt-get install -y --only-upgrade ca-certificates && rm -rf /var/lib/apt/lists/*) || true)"}
+    note: "Distro bundles were fixed 2026-10-20/21; a cached base keeps the old roots. The inserted RUN makes rebuilds self-correcting. Python images also need a certifi upgrade in the lockfile."
+
+  - id: builder-ca-copy
+    type: content
+    files: ["Dockerfile", "Dockerfile.*", "*.dockerfile", "Containerfile"]
+    any: ['re:COPY\s+--from=\S+\s+\S*ca-certificates\.crt']
+    severity: {present: high}
+    fix: {present: {kind: manual}}
+    note: "CA bundle is copied from a builder stage; that stage must upgrade ca-certificates or the runtime inherits the old roots."
+
+  # ---- version pins ----
+  - id: node-pin
+    type: regex-version
+    files: [".nvmrc", ".node-version"]
+    pattern: '^\s*v?(?P<version>\d[\w.]*)'
+    table: node
+    line_parts: 1
+    pin_parts: 3
+    severity: {vulnerable: high, eol: high, floating: high, unknown: low}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      floating: {kind: rewrite, to: "{fixed}"}
+      eol: {kind: manual}
+
+  - id: node-pin-alias
+    type: content
+    files: [".nvmrc", ".node-version"]
+    any: ['re:^\s*lts\S*']
+    severity: {present: low}
+    fix: {present: {kind: rewrite, to: "24.22.1"}}
+    note: "lts/* resolves to whatever nvm has cached; pin explicitly."
+
+  - id: node-tool-versions
+    type: regex-version
+    files: [".tool-versions"]
+    pattern: '^(?:nodejs|node)\s+(?P<version>\S+)'
+    table: node
+    line_parts: 1
+    severity: {vulnerable: high, eol: high, floating: high}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      floating: {kind: rewrite, to: "{fixed}"}
+      eol: {kind: manual}
+
+  - id: go-tool-versions
+    type: regex-version
+    files: [".tool-versions"]
+    pattern: '^(?:golang|go)\s+(?P<version>\S+)'
+    table: go
+    severity: {vulnerable: high, eol: high, floating: high}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      floating: {kind: rewrite, to: "{fixed}"}
+      eol: {kind: manual}
+
+  - id: package-json-engines-node
+    type: regex-version
+    files: ["package.json"]
+    pattern: '^\s*"node"\s*:\s*"[^"\d]*(?P<version>\d[\d.]*)'
+    table: node
+    line_parts: 1
+    pin_parts: 3
+    severity: {vulnerable: high, eol: high, floating: medium}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      floating: {kind: manual}
+      eol: {kind: manual}
+    note: "engines.node / volta.node. A '>=' floor is not a pin; check CI before upgrading."
+
+  - id: package-json-electron
+    type: regex-version
+    files: ["package.json"]
+    pattern: '^\s*"electron"\s*:\s*"[^"\d]*(?P<version>\d[\d.]*)'
+    table: electron
+    line_parts: 1
+    pin_parts: 3
+    severity: {vulnerable: high, eol: high, floating: high}
+    fix:
+      vulnerable: {kind: tool, command: "npm install -D electron@{fixed}"}
+      floating: {kind: tool, command: "npm install -D electron@{fixed}"}
+      eol: {kind: manual}
+    note: "Electron ships Chromium's roots and gets no CRLSet updates."
+
+  - id: package-json-bun
+    type: content
+    files: ["package.json"]
+    any: ['re:^\s*"(bun|bun-types)"\s*:']
+    severity: {present: medium}
+    fix: {present: {kind: manual}}
+    note: "Project uses Bun; no fixed release yet."
+
+  - id: go-mod-toolchain
+    type: regex-version
+    files: ["go.mod"]
+    pattern: '^\s*(?:toolchain\s+go|go\s+)(?P<version>\d+\.\d+\.\d+)'
+    table: go
+    severity: {vulnerable: high, eol: medium}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      eol: {kind: manual}
+    note: "Go embeds an SPKI denylist from 1.26.10 / 1.27.3. macOS uses the OS store; Linux containers and CI don't."
+
+  - id: go-mod-language-line
+    type: regex-version
+    files: ["go.mod"]
+    pattern: '^\s*go\s+(?P<version>\d+\.\d+)\s*$'
+    table: go
+    pin_parts: 2
+    severity: {eol: medium, vulnerable: info, floating: info, unknown: info}
+    fix:
+      eol: {kind: manual}
+    note: "go directive on an unsupported line; GOTOOLCHAIN=auto picks whatever CI has installed."
+
+  - id: ci-go-version
+    type: regex-version
+    files: [".github/workflows/*.y*ml"]
+    pattern: '^\s*go-version:\s*["'']?(?P<version>[^"''\s#]+)'
+    table: go
+    skip: ["stable", "oldstable", "latest"]
+    severity: {vulnerable: high, eol: high, floating: high}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      floating: {kind: rewrite, to: "{fixed}"}
+      eol: {kind: manual}
+
+  - id: ci-node-version
+    type: regex-version
+    files: [".github/workflows/*.y*ml"]
+    pattern: '^\s*node-version:\s*["'']?(?P<version>[^"''\s#]+)'
+    table: node
+    line_parts: 1
+    skip: ["lts/*", "latest", "current"]
+    severity: {vulnerable: high, eol: high, floating: high}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      floating: {kind: rewrite, to: "{fixed}"}
+      eol: {kind: manual}
+
+  - id: ci-bun-version
+    type: content
+    files: [".github/workflows/*.y*ml"]
+    any: ['re:^\s*bun-version:']
+    severity: {present: medium}
+    fix: {present: {kind: manual}}
+
+  # ---- packages that carry their own roots ----
+  - id: certifi-pin
+    type: regex-version
+    files: ["requirements*.txt", "constraints*.txt", "pyproject.toml", "Pipfile", "setup.py", "setup.cfg"]
+    pattern: '^\s*(?:name\s*=\s*)?["'']?certifi["'']?\s*(?:==|>=|~=|=)\s*["'']?(?P<version>\d{4}\.\d{1,2}\.\d{1,2})'
+    table: certifi
+    line_parts: 1
+    pin_parts: 3
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: rewrite, pattern: '(certifi["'']?\s*)(?:==|>=|~=|=)(\s*["'']?)[\d.]+', to: '${1}>=${2}{fixed}'}
+    note: "requests, httpx, urllib3, pip and boto3 all read certifi; a pin below the fix is reinstalled on every deploy."
+
+  - id: certifi-unpinned
+    type: content
+    files: ["requirements*.txt", "constraints*.txt"]
+    any: ['re:^\s*certifi\s*$']
+    severity: {present: low}
+    fix: {present: {kind: rewrite, to: "certifi>=2026.10.19"}}
+    note: "Unpinned certifi; add a floor so an old cache can't satisfy it."
+
+  - id: python-lock-certifi
+    type: pair
+    files: ["uv.lock", "poetry.lock", "pdm.lock"]
+    name_pattern: '^\s*name\s*=\s*"(?P<name>certifi)"\s*$'
+    version_pattern: '^\s*version\s*=\s*"(?P<version>[\d.]+)"'
+    packages: {certifi: certifi}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: tool, command: "uv lock --upgrade-package certifi || poetry update certifi || pdm update certifi"}
+
+  - id: pipfile-lock-certifi
+    type: pair
+    files: ["Pipfile.lock"]
+    name_pattern: '^\s*"(?P<name>certifi)"\s*:\s*\{'
+    version_pattern: '^\s*"version"\s*:\s*"==(?P<version>[\d.]+)"'
+    packages: {certifi: certifi}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: tool, command: "pipenv update certifi"}
+
+  - id: cargo-lock-webpki
+    type: pair
+    files: ["Cargo.lock"]
+    name_pattern: '^name\s*=\s*"(?P<name>webpki-roots|webpki-root-certs|rustls-webpki)"'
+    version_pattern: '^version\s*=\s*"(?P<version>[\d.]+)"'
+    packages: {webpki-roots: webpki-roots, webpki-root-certs: webpki-root-certs, rustls-webpki: rustls-webpki}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: tool, command: "cargo update -p {name}"}
+    note: "rustls + webpki-roots embed Mozilla's roots; native-tls builds use the OS store."
+
+  - id: composer-lock-ca-bundle
+    type: pair
+    files: ["composer.lock"]
+    name_pattern: '^\s*"name"\s*:\s*"(?P<name>composer/ca-bundle)"'
+    version_pattern: '^\s*"version"\s*:\s*"v?(?P<version>[\d.]+)"'
+    packages: {composer/ca-bundle: composer-ca-bundle}
+    line_parts: 2
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: tool, command: "composer update composer/ca-bundle"}
+
+  - id: mix-lock-castore
+    type: pair
+    files: ["mix.lock"]
+    name_pattern: '^\s*"(?P<name>castore|certifi)":'
+    version_pattern: ':(?:castore|certifi),\s*"(?P<version>[\d.]+)"'
+    packages: {castore: castore, certifi: erlang-certifi}
+    severity: {vulnerable: high, unknown: medium}
+    fix:
+      vulnerable: {kind: tool, command: "mix deps.update {name}"}
+      unknown: {kind: manual}
+    note: "erlang-certifi has no fix yet; prefer castore or :public_key.cacerts_get()."
+
+  # ---- vendored trust stores ----
+  - id: vendored-ca-bundle
+    type: content
+    files: ["**/*.pem", "**/*.crt", "**/*.cer", "**/*.bundle", "**/cacert*", "**/ca-bundle*", "**/ca-certificates*"]
+    max_size: 2097152
+    any: ["$bad_roots", "$bad_intermediates"]
+    severity: {present: critical}
+    fix: {present: {kind: manual}}
+    note: "A vendored bundle that lists these names trusts the compromised chain with no revocation. Replace with curl's bundle (https://curl.se/docs/caextract.html) or stop vendoring. Check testdata/ paths before acting."
+
+  - id: heroku-runtime
+    type: content
+    files: ["runtime.txt"]
+    any: ['re:^python-']
+    severity: {present: low}
+    fix: {present: {kind: manual}}
+    note: "Heroku-style runtime; certifi comes from requirements."
+
+verify:
+  - id: curl-rejects-emudhra-root
+    run: ["curl", "-sSf", "--max-time", "10", "https://dv-g3b-emudhra.we-have-a-problem.com/"]
+    expect: {fails: true}
+  - id: curl-rejects-aaa-cross-sign
+    run: ["curl", "-sSf", "--max-time", "10", "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/"]
+    expect: {fails: true}
+  - id: node-rejects
+    run: ["node", "-e", "fetch('https://dv-g3b-emudhra.we-have-a-problem.com/').then(()=>process.exit(0),()=>process.exit(1))"]
+    expect: {fails: true}
+  - id: python-certifi-rejects
+    run: ["python3", "-c", "import ssl,certifi,urllib.request as u; u.urlopen('https://dv-g3b-emudhra.we-have-a-problem.com/',timeout=10,context=ssl.create_default_context(cafile=certifi.where()))"]
+    expect: {fails: true}

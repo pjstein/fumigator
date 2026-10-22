@@ -1,0 +1,5 @@
+services:
+  web:
+    image: "php:8.2.30-fpm"
+  wp:
+    image: wordpress:latest

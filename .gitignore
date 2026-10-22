@@ -1,0 +1,6 @@
+bin/
+dist/
+findings/
+emudhra/*.log
+emudhra/*.out
+skills/*.skill

@@ -1,0 +1,140 @@
+id: php2shell-2026-10
+title: PHP2Shell unauthenticated RCE (CVE-2026-109618, CVE-2026-109619)
+advisory: https://www.php.net/archive/2026.php#2026-10-21-5
+published: "2026-10-21"
+updated: "2026-10-22"
+summary: >
+  PHP ≥ 5.4 has an unauthenticated remote code execution bug, exploited in the wild before the
+  patch. Fixed in 8.2.35, 8.3.36, 8.4.27, 8.5.12; lines ≤ 8.1 get no fix from php.net.
+  WordPress sites are additionally exposed through wp2shell (CVE-2026-63030) and CVE-2026-87902.
+
+versions:
+  php: {"8.2": "8.2.35", "8.3": "8.3.36", "8.4": "8.4.27", "8.5": "8.5.12"}
+  wordpress: {"6.9": "6.9.5", "7.0": "7.0.6", "7.1": "7.1.2"}
+eol:
+  php: ["5", "7", "8.0", "8.1"]
+
+detectors:
+  - id: php-image-tag
+    type: regex-version
+    files: ["Dockerfile", "Dockerfile.*", "*.dockerfile", "Containerfile",
+            "docker-compose*.y*ml", "compose*.y*ml",
+            ".github/workflows/*.y*ml", ".gitlab-ci.yml", "bitbucket-pipelines.yml",
+            ".buildkite/*.y*ml", ".circleci/config.yml",
+            "**/k8s/**/*.y*ml", "**/kube/**/*.y*ml", "**/manifests/**/*.y*ml",
+            "**/deploy/**/*.y*ml", "**/charts/**/values*.y*ml"]
+    pattern: '^\s*(?:-\s*)?(?:FROM\s+(?:--platform=\S+\s+)?|(?:image|container):\s*["'']?)(?P<name>(?:[\w.-]+/)*php):(?P<version>[\w.+-]+)'
+    table: php
+    line_parts: 2
+    pin_parts: 3
+    skip: ["latest", "fpm", "cli", "apache", "alpine"]
+    severity: {vulnerable: critical, eol: critical, floating: critical, unknown: medium}
+    fix:
+      vulnerable: {kind: rewrite, capture: numeric, to: "{fixed}"}
+      floating: {kind: rewrite, capture: numeric, to: "{fixed}"}
+      eol: {kind: manual}
+      unknown: {kind: manual}
+    note: "php:* images carry the vulnerable interpreter; PHP2Shell is pre-auth."
+
+  - id: wordpress-image
+    type: content
+    files: ["Dockerfile", "Dockerfile.*", "*.dockerfile", "docker-compose*.y*ml", "compose*.y*ml",
+            "**/k8s/**/*.y*ml", "**/manifests/**/*.y*ml", "**/deploy/**/*.y*ml"]
+    any: ['re:^\s*(?:-\s*)?(?:FROM\s+|image:\s*["'']?)(?:[\w.-]+/)*wordpress:[\w.+-]+']
+    severity: {present: critical}
+    fix: {present: {kind: manual}}
+    note: "WordPress image must run a fixed PHP and WP ≥ 7.1.2 / 7.0.6 / 6.9.5; re-pull and check the digest date."
+
+  - id: php-tool-versions
+    type: regex-version
+    files: [".tool-versions"]
+    pattern: '^php\s+(?P<version>\S+)'
+    table: php
+    severity: {vulnerable: critical, eol: critical, floating: high}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      floating: {kind: rewrite, to: "{fixed}"}
+      eol: {kind: manual}
+
+  - id: php-version-file
+    type: regex-version
+    files: [".php-version"]
+    pattern: '^\s*(?P<version>\d[\w.]*)'
+    table: php
+    severity: {vulnerable: critical, eol: critical, floating: high}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      floating: {kind: rewrite, to: "{fixed}"}
+      eol: {kind: manual}
+
+  - id: php-ci-version
+    type: regex-version
+    files: [".github/workflows/*.y*ml"]
+    pattern: '^\s*php-version:\s*["'']?(?P<version>[^"''\s#]+)'
+    table: php
+    skip: ["latest", "nightly"]
+    severity: {vulnerable: critical, eol: critical, floating: high}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+      floating: {kind: rewrite, to: "{fixed}"}
+      eol: {kind: manual}
+    note: "setup-php pin decides what builds and tests the artefact."
+
+  - id: composer-php-constraint
+    type: regex-version
+    files: ["composer.json"]
+    exclude: ["**/vendor/**", "**/node_modules/**"]
+    after: '^\s*"require"\s*:\s*\{'
+    within: 40
+    pattern: '^\s*"php"\s*:\s*"(?P<version>[^"]+)"'
+    table: php
+    line_parts: 2
+    pin_parts: 99
+    severity: {eol: high, floating: info, vulnerable: info, unknown: info}
+    fix:
+      eol: {kind: manual}
+    note: "A constraint that allows an EOL line says the code tolerates it; the deployed server version is what matters. Libraries: downgrade to info."
+
+  - id: composer-lock-platform
+    type: regex-version
+    files: ["composer.lock"]
+    exclude: ["**/vendor/**", "**/node_modules/**"]
+    after: '^\s*"platform"\s*:\s*\{'
+    within: 3
+    pattern: '^\s*"php"\s*:\s*"[^"\d]*(?P<version>\d[^"]*)"'
+    table: php
+    pin_parts: 3
+    severity: {vulnerable: critical, eol: critical, floating: medium}
+    fix:
+      vulnerable: {kind: tool, command: "composer config platform.php {fixed} && composer update --lock"}
+      eol: {kind: manual}
+      floating: {kind: manual}
+
+  - id: wordpress-core
+    type: regex-version
+    files: ["**/wp-includes/version.php"]
+    pattern: '^\s*\$wp_version\s*=\s*[''"](?P<version>[\d.]+)'
+    table: wordpress
+    line_parts: 2
+    pin_parts: 2
+    severity: {vulnerable: critical, eol: critical, unknown: critical}
+    fix:
+      vulnerable: {kind: manual}
+      eol: {kind: manual}
+      unknown: {kind: manual}
+    note: "WordPress core below the fixed release (CVE-2026-87902 / wp2shell); upgrade core and check PHP."
+
+  - id: php-ini-upload-progress
+    type: content
+    files: ["php.ini", "php-fpm.conf", "**/php-fpm.d/*.conf", "**/php/**/*.ini", "*.ini"]
+    exclude: ["**/testdata/**", "**/fixtures/**"]
+    any: ['re:^\s*session\.upload_progress\.enabled\s*=\s*(1|On|on|true|True)\b']
+    severity: {present: medium}
+    fix:
+      present: {kind: rewrite, to: "session.upload_progress.enabled = 0"}
+    note: "Mitigation only; php.net says only the update is complete. Must be in php.ini or the FPM pool, not .user.ini."
+
+verify:
+  - id: php-version
+    run: ["php", "-r", "echo PHP_VERSION;"]
+    expect: {version_at_least: php}

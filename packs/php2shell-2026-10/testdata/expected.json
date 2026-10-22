@@ -1,0 +1,106 @@
+[
+ {
+  "Detector": "php-ci-version",
+  "File": ".github/workflows/ci.yml",
+  "Line": 6,
+  "State": "eol",
+  "Current": "8.1",
+  "Fixed": ""
+ },
+ {
+  "Detector": "php-version-file",
+  "File": ".php-version",
+  "Line": 1,
+  "State": "vulnerable",
+  "Current": "8.2.1",
+  "Fixed": "8.2.35"
+ },
+ {
+  "Detector": "php-tool-versions",
+  "File": ".tool-versions",
+  "Line": 1,
+  "State": "vulnerable",
+  "Current": "8.3.30",
+  "Fixed": "8.3.36"
+ },
+ {
+  "Detector": "php-image-tag",
+  "File": "Dockerfile",
+  "Line": 1,
+  "State": "vulnerable",
+  "Current": "php:8.3.30-fpm-alpine",
+  "Fixed": "8.3.36"
+ },
+ {
+  "Detector": "php-image-tag",
+  "File": "Dockerfile",
+  "Line": 3,
+  "State": "eol",
+  "Current": "php:8.1-apache",
+  "Fixed": ""
+ },
+ {
+  "Detector": "php-image-tag",
+  "File": "Dockerfile",
+  "Line": 4,
+  "State": "floating",
+  "Current": "php:8.4",
+  "Fixed": "8.4.27"
+ },
+ {
+  "Detector": "wordpress-image",
+  "File": "Dockerfile",
+  "Line": 6,
+  "State": "present",
+  "Current": "FROM wordpress:6.8-php8.2",
+  "Fixed": ""
+ },
+ {
+  "Detector": "composer-lock-platform",
+  "File": "composer.lock",
+  "Line": 3,
+  "State": "vulnerable",
+  "Current": "8.2.30",
+  "Fixed": "8.2.35"
+ },
+ {
+  "Detector": "php-image-tag",
+  "File": "docker-compose.yml",
+  "Line": 3,
+  "State": "vulnerable",
+  "Current": "php:8.2.30-fpm",
+  "Fixed": "8.2.35"
+ },
+ {
+  "Detector": "wordpress-image",
+  "File": "docker-compose.yml",
+  "Line": 5,
+  "State": "present",
+  "Current": "image: wordpress:latest",
+  "Fixed": ""
+ },
+ {
+  "Detector": "wordpress-core",
+  "File": "wp/wp-includes/version.php",
+  "Line": 2,
+  "State": "vulnerable",
+  "Current": "7.1.1",
+  "Fixed": "7.1.2"
+ },
+ {
+  "Detector": "composer-php-constraint",
+  "File": "composer.json",
+  "Line": 3,
+  "State": "eol",
+  "Current": "^8.1",
+  "Fixed": ""
+ },
+ {
+  "Detector": "php-ini-upload-progress",
+  "File": "php.ini",
+  "Line": 1,
+  "State": "present",
+  "Current": "session.upload_progress.enabled = On",
+  "Fixed": ""
+ }
+]
