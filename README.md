@@ -58,6 +58,6 @@ lists every table with its columns and what it holds. Adding one is a new file t
 implements `table.Collector` and registers itself in `init()`.
 
 `fix` rules: dry run unless `--apply`; refuses a repo with modified tracked files; reuses the
-`sec/<pack-id>` branch; never force-pushes; never hand-edits a lockfile (a tool that is missing
+`sec/<pack-id>` (commit and PR title `fix(security): …`, which conventional-commit linters accept) branch; never force-pushes; never hand-edits a lockfile (a tool that is missing
 or fails becomes a checklist item); stages tracked files plus known lockfiles only; with no
 `origin` or no `gh` auth it commits locally and leaves the body at `.git/PR_BODY.md`.

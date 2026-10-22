@@ -343,7 +343,8 @@ func (r *remediator) commitAndPR(name string) {
 	}
 	if gitErr(repo, "diff", "--cached", "--quiet") != nil {
 		var b strings.Builder
-		fmt.Fprintf(&b, "sec: %s remediation\n\n", r.p.ID)
+		// conventional-commit type so commitlint-style gates accept it
+		fmt.Fprintf(&b, "fix(security): %s remediation\n\n", r.p.ID)
 		for _, e := range r.res.Edits {
 			fmt.Fprintf(&b, "- %s:%d: %s -> %s\n", e.File, e.Line, trunc(e.Before, 50), trunc(e.After, 50))
 		}
@@ -382,7 +383,7 @@ func (r *remediator) commitAndPR(name string) {
 		r.res.Refused = "push: " + err.Error()
 		return
 	}
-	title := fmt.Sprintf("sec: %s (%s)", r.p.Title, name)
+	title := fmt.Sprintf("fix(security): %s (%s)", r.p.Title, name)
 	args := []string{"pr", "create", "--title", title, "--body-file", bp, "--base", r.opt.Base, "--head", r.opt.Branch}
 	if r.opt.Draft {
 		args = append(args, "--draft")
