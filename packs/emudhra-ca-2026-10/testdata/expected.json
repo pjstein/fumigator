@@ -112,6 +112,14 @@
   "Fixed": "22.23.4"
  },
  {
+  "Detector": "base-image-ca-upgrade",
+  "File": "Dockerfile",
+  "Line": 13,
+  "State": "absent",
+  "Current": "FROM nginx:1.27-alpine AS serve",
+  "Fixed": ""
+ },
+ {
   "Detector": "composer-lock-ca-bundle",
   "File": "composer.lock",
   "Line": 4,

@@ -90,12 +90,12 @@ detectors:
     # a bare distro FROM with no ca-certificates step in the same stage
     type: absent
     files: ["Dockerfile", "Dockerfile.*", "*.dockerfile", "Containerfile"]
-    trigger: '(?i)^\s*FROM\s+(?:--platform=\S+\s+)?(?:[\w.-]+/)*(?:alpine|debian|ubuntu|python|pypy)(?::[^\s$]+)?(?:\s+AS\s+\S+)?\s*$'
+    trigger: '(?i)^\s*FROM\s+(?:--platform=\S+\s+)?(?:[\w.-]+/)*(?:alpine|debian|ubuntu|python|pypy|nginx|httpd|caddy|haproxy|traefik|openresty/openresty)(?::[^\s$]+)?(?:\s+AS\s+\S+)?\s*$'
     require: '^\s*RUN\b.*(ca-certificates|update-ca-trust|update-ca-certificates|pip3?\s+install.*certifi)'
     severity: {absent: high}
     fix:
       absent: {kind: insert-after, to: "RUN (apk upgrade --no-cache ca-certificates 2>/dev/null || (apt-get update && apt-get install -y --only-upgrade ca-certificates && rm -rf /var/lib/apt/lists/*) || true)"}
-    note: "Distro bundles were fixed 2026-10-20/21; a cached base keeps the old roots. The inserted RUN makes rebuilds self-correcting. Python images also need a certifi upgrade in the lockfile."
+    note: "Distro bundles were fixed 2026-10-20/21; a cached base keeps the old roots, and a frozen server-image tag (nginx:1.27-alpine, httpd:2.4) never gets them. The inserted RUN makes rebuilds self-correcting. Python images also need a certifi upgrade in the lockfile."
 
   - id: builder-ca-copy
     type: content
