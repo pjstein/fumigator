@@ -418,7 +418,7 @@ host:
     where: {owner: nix, bad_roots: "re:."}
     severity: {present: high}
     fix:
-      present: {suggest: "nix-env -p /nix/var/nix/profiles/default -iA nixpkgs.cacert && nix-channel --update", manual: "nix fetches through its own cacert package in the default profile; upgrade it (profile is user-owned here, so no sudo)"}
+      present: {sudo: true, command: "sudo -i nix-channel --update && sudo -i nix-env -p /nix/var/nix/profiles/default -iA nixpkgs.cacert", manual: "nix fetches through its own cacert package in the default profile, whose lock file is root-owned on a multi-user install"}
 
   - id: conda-env-bundle
     table: ca_bundles
@@ -447,7 +447,7 @@ host:
     where: {manager: cargo, crate: "re:."}
     severity: {present: high}
     fix:
-      present: {suggest: "cargo install --force {crate}", manual: "{name} has a root store compiled in (rustls + webpki-roots); rebuilding pulls the fixed webpki-roots once the crate's dependency range allows it; re-run this check to confirm"}
+      present: {suggest: "cargo install --force {crate} || cargo install --force --locked {crate}", manual: "{name} has a root store compiled in (rustls + webpki-roots). A fresh resolve pulls the fixed webpki-roots when the crate's range allows; a crate that insists on --locked keeps its own pinned copy until upstream releases, so if this check still fires afterwards, the fix is upstream's"}
 
   - id: embedded-roots-brew
     table: binaries_embedding_roots
@@ -465,14 +465,14 @@ host:
 
   - id: podman-machine
     table: container_vms
-    where: {runtime: podman}
+    where: {runtime: podman, bad_roots: "!re:^$"}
     severity: {present: medium}
     fix:
-      present: {suggest: "podman machine stop {name}; podman machine rm -f {name} && podman machine init {name} && podman machine start {name}", manual: "the podman VM ({name}, created {created}) has its own Fedora CoreOS trust store; recreate it from a current image (containers and volumes inside it are lost; images re-pull)"}
+      present: {suggest: "podman machine ssh {name} 'sudo mkdir -p /etc/pki/ca-trust/source/blocklist && for cn in \"emSign ECC Root CA - G3\" \"AAA Certificate Services\"; do awk -v cn=\"$cn\" \"/^# /{name=\\$0} /BEGIN CERTIFICATE/{buf=\\$0; next} buf!=\\\"\\\"{buf=buf\\\"\\\\n\\\"\\$0} /END CERTIFICATE/{ if (index(name, cn)) print buf; buf=\\\"\\\" }\" /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem | sudo tee \"/etc/pki/ca-trust/source/blocklist/$(echo $cn | tr \" \" _).pem\" >/dev/null; done; sudo update-ca-trust'", manual: "the podman VM ({name}, created {created}) keeps its own Fedora trust store (still lists: {bad_roots}). An old podman pulls an equally old VM image and rpm-ostree/bootc cannot move it forward, so: brew install podman (6.x) and recreate the machine, then block the two roots inside the VM with the command here (persists in /etc). Verify: podman machine ssh {name} curl -sSf https://dv-g3b-emudhra.we-have-a-problem.com/ must fail."}
 
   - id: docker-desktop-vm
     table: container_vms
-    where: {runtime: docker}
+    where: {runtime: docker, bad_roots: "!re:^$"}
     severity: {present: low}
     fix:
       present: {manual: "Docker Desktop {version}: install the current release (its VM trust store ships with the app), then rebuild images with --pull --no-cache"}
