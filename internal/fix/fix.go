@@ -16,6 +16,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/pjstein/fumigator/internal/findings"
 	"github.com/pjstein/fumigator/internal/pack"
@@ -207,9 +208,71 @@ func (r *remediator) rewrite(f findings.Finding) {
 		r.res.Skipped = append(r.res.Skipped, fmt.Sprintf("%s:%d %s: rewrite produced no change", f.File, f.Line, f.Detector))
 		return
 	}
+	// A reference pinned by digest resolves by the digest; a changed tag alone changes nothing.
+	// Resolve the new tag's digest from the registry, or leave the edit to a person.
+	if m := digestRef.FindStringSubmatch(after); m != nil {
+		d, err := resolveDigest(m[1])
+		if err != nil {
+			f.Note = fmt.Sprintf("the image is pinned by digest and the digest for %s could not be resolved here (%v); update tag and digest together", m[1], err)
+			f.Fix = "manual"
+			r.res.Manual = append(r.res.Manual, f)
+			return
+		}
+		after = strings.Replace(after, m[2], d, 1)
+	}
 	r.files[f.File][i] = after
 	r.dirty[f.File] = true
 	r.res.Edits = append(r.res.Edits, Edit{f.File, i + 1, old, after, why(f)})
+	r.refreshComment(f.File, i, f.Replace, f.FixText)
+}
+
+// digestRef matches "name:tag@sha256:..." in a FROM or image: line.
+var digestRef = regexp.MustCompile(`([\w./-]+:[\w.+-]+)@(sha256:[0-9a-f]{64})`)
+
+// resolveDigest asks the registry (through docker's buildx tooling) for the manifest digest of
+// a tag; it is the same digest `docker pull` prints.
+func resolveDigest(ref string) (string, error) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return "", fmt.Errorf("docker not installed")
+	}
+	out, err := exec.Command("docker", "buildx", "imagetools", "inspect", ref, "--format", "{{.Manifest.Digest}}").Output()
+	if err != nil {
+		return "", fmt.Errorf("docker buildx imagetools inspect %s failed", ref)
+	}
+	d := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(d, "sha256:") || len(d) != 71 {
+		return "", fmt.Errorf("unexpected digest %q", d)
+	}
+	return d, nil
+}
+
+var isoDate = regexp.MustCompile(`\b20\d\d-\d\d-\d\d\b`)
+
+// refreshComment updates a comment directly above an edited line that names the old version
+// (and, when it also carries a pin date, that date), so the comment does not contradict the
+// line it describes.
+func (r *remediator) refreshComment(rel string, i int, oldVer, newVer string) {
+	if oldVer == "" || newVer == "" || oldVer == newVer {
+		return
+	}
+	lines := r.files[rel]
+	for j := i - 1; j >= 0 && j >= i-3; j-- {
+		l := lines[j]
+		t := strings.TrimSpace(l)
+		if !strings.HasPrefix(t, "#") && !strings.HasPrefix(t, "//") {
+			break
+		}
+		if !strings.Contains(l, oldVer) {
+			continue
+		}
+		n := strings.Replace(l, oldVer, newVer, 1)
+		if isoDate.MatchString(n) {
+			n = isoDate.ReplaceAllString(n, time.Now().Format("2006-01-02"))
+		}
+		lines[j] = n
+		r.res.Edits = append(r.res.Edits, Edit{rel, j + 1, l, n, "comment named the old pin"})
+		return
+	}
 }
 
 func (r *remediator) alreadyApplied(f findings.Finding) bool {

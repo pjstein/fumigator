@@ -8,3 +8,5 @@ FROM python:3.12-slim
 RUN pip install -U certifi pip
 FROM oven/bun:1.2
 FROM scratch
+# Pinned by digest (node:22.1.0-bookworm-slim as of 2026-01-10); bump deliberately.
+FROM node:22.1.0-bookworm-slim@sha256:0000000000000000000000000000000000000000000000000000000000000000 AS pinned

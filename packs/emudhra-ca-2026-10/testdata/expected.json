@@ -104,6 +104,14 @@
   "Fixed": ""
  },
  {
+  "Detector": "node-image-line",
+  "File": "Dockerfile",
+  "Line": 12,
+  "State": "vulnerable",
+  "Current": "node:22.1.0-bookworm-slim",
+  "Fixed": "22.23.4"
+ },
+ {
   "Detector": "composer-lock-ca-bundle",
   "File": "composer.lock",
   "Line": 4,

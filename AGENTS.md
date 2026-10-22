@@ -15,6 +15,12 @@ repositories, and across a GitHub organisation. Read this file, then `README.md`
   is the brief for the decisions the binary will not make: moving a service off an EOL runtime, replacing a vendored CA bundle,
   anything that changes what software an app runs on.
 
+## Which binary
+
+Run `fumigator version` first. In this checkout, `make install` puts the current build on PATH
+as `fumigator`; use that, not `bin/fumigator` in one place and a release in another. A
+version ending in `-dirty` means uncommitted changes are in the binary you are testing.
+
 ## Commands you will use
 
 ```bash

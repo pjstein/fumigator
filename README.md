@@ -138,10 +138,14 @@ docs/ARCHITECTURE.md      design, pack format, collector tables
 ## Development
 
 ```bash
-make build      # bin/fumigator, CGO off, static
+make build      # bin/fumigator, CGO off, static, version stamped from git describe
+make install    # the same build into $(go env GOPATH)/bin, so `fumigator` on PATH is this checkout
 make test       # golangci-lint, go vet, go test, pack fixtures
 make release    # dist/ binaries for darwin and linux, arm64 and amd64
 ```
+
+`fumigator version` prints the stamp; check it before trusting a result from a machine where
+both a release and a checkout build could be on PATH.
 
 Releases are built by goreleaser on a `v*` tag.
 
