@@ -418,7 +418,7 @@ host:
     where: {owner: nix, bad_roots: "re:."}
     severity: {present: high}
     fix:
-      present: {sudo: true, command: "sudo -i nix-channel --update && sudo -i nix-env -p /nix/var/nix/profiles/default -iA nixpkgs.cacert", manual: "nix fetches through its own cacert package in the default profile, whose lock file is root-owned on a multi-user install"}
+      present: {sudo: true, command: "sudo /nix/var/nix/profiles/default/bin/nix-env -p /nix/var/nix/profiles/default -f https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz -iA cacert", manual: "nix fetches through its own cacert package in the default profile, whose lock file is root-owned on a multi-user install. Full binary path because root's shell does not source the nix profile; a nixpkgs tarball because root has no channel."}
 
   - id: conda-env-bundle
     table: ca_bundles
