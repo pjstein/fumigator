@@ -63,7 +63,7 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `usage:
   fumigator scan  --pack ID [--pack ID...] [--out DIR] [--org ORG] [--all] [--depth N] ROOT...
-  fumigator fix   --pack ID --findings DIR [--apply] [--run-tools] [--pr] [--only name,..] [--skip name,..]
+  fumigator fix   --pack ID --findings DIR [--apply] [--run-tools] [--pr [--draft]] [--only name,..] [--skip name,..]
                   [--branch NAME] [--base BRANCH] [--body-only PATH --only NAME]
   fumigator host  --pack ID [--pack ID...] [--apply] [--only id,..] [--venv-roots DIR,..] [--out DIR] [--tables]
   fumigator gh    sync --org ORG [--workers N] [--depth N] DEST
@@ -239,6 +239,7 @@ func cmdFix(args []string) error {
 	apply := fs.Bool("apply", false, "edit files on a branch (default: dry run)")
 	runTools := fs.Bool("run-tools", false, "run lockfile tool commands that are on PATH")
 	pr := fs.Bool("pr", false, "commit, push and open a PR (implies --apply)")
+	draft := fs.Bool("draft", false, "open PRs as drafts")
 	only := fs.String("only", "", "comma-separated report names to include")
 	skip := fs.String("skip", "", "comma-separated report names to exclude")
 	branch := fs.String("branch", "", "branch name (default sec/<pack-id>)")
@@ -294,7 +295,7 @@ func cmdFix(args []string) error {
 			return nil
 		}
 		fmt.Printf("== %s (%s)\n", name, rep.Repo)
-		res := fix.Run(p, rep, fix.Options{Apply: *apply, RunTools: *runTools, PR: *pr, Branch: *branch, Base: *base})
+		res := fix.Run(p, rep, fix.Options{Apply: *apply, RunTools: *runTools, PR: *pr, Branch: *branch, Base: *base, Draft: *draft})
 		printResult(res, *apply)
 		fmt.Fprintf(&log, "## %s\n\n", name)
 		fmt.Fprintf(&log, "%s", describe(res, *apply))
@@ -304,6 +305,9 @@ func cmdFix(args []string) error {
 		}
 		if res.Refused != "" {
 			st = "refused: " + res.Refused
+		}
+		if res.ManualOnly {
+			st = "manual only (no PR)"
 		}
 		rows = append(rows, row{name, res.PRURL, st, len(res.Manual)})
 	}

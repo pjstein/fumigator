@@ -27,6 +27,7 @@ type Options struct {
 	PR       bool
 	Branch   string // default sec/<pack-id>
 	Base     string // default: current branch at apply time
+	Draft    bool   // open the PR as a draft
 }
 
 type Edit struct {
@@ -55,6 +56,9 @@ type Result struct {
 	PRURL    string
 	Note     string
 	BodyPath string
+	// ManualOnly is true when the repo has findings but none the tool can change: no diff,
+	// so no PR; the body is still written for an issue.
+	ManualOnly bool
 }
 
 var lockfiles = map[string]bool{
@@ -359,6 +363,13 @@ func (r *remediator) commitAndPR(name string) {
 		r.note("nothing to change; no PR")
 		return
 	}
+	// no commits ahead of base: nothing to push, so no PR
+	if r.opt.Base != "" && gitErr(repo, "diff", "--quiet", r.opt.Base, "HEAD") == nil {
+		r.res.ManualOnly = true
+		r.note("manual items only, no file changes: no PR; body at " + bp + " for an issue")
+		_ = gitErr(repo, "checkout", "-q", r.opt.Base)
+		return
+	}
 	if gitErr(repo, "remote", "get-url", "origin") != nil {
 		r.note("no origin remote; committed locally, PR body at " + bp)
 		return
@@ -372,7 +383,11 @@ func (r *remediator) commitAndPR(name string) {
 		return
 	}
 	title := fmt.Sprintf("sec: %s (%s)", r.p.Title, name)
-	c := exec.Command("gh", "pr", "create", "--title", title, "--body-file", bp, "--base", r.opt.Base, "--head", r.opt.Branch)
+	args := []string{"pr", "create", "--title", title, "--body-file", bp, "--base", r.opt.Base, "--head", r.opt.Branch}
+	if r.opt.Draft {
+		args = append(args, "--draft")
+	}
+	c := exec.Command("gh", args...)
 	c.Dir = repo
 	out, err := c.CombinedOutput()
 	s := strings.TrimSpace(string(out))
