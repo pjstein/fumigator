@@ -415,10 +415,10 @@ host:
 
   - id: nix-bundle
     table: ca_bundles
-    where: {owner: nix, bad_roots: "re:."}
+    where: {owner: "re:^nix(:custom)?$", bad_roots: "re:."}
     severity: {present: high}
     fix:
-      present: {sudo: true, command: "sudo /nix/var/nix/profiles/default/bin/nix-env -p /nix/var/nix/profiles/default -f https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz -iA cacert", manual: "nix fetches through its own cacert package in the default profile, whose lock file is root-owned on a multi-user install. Full binary path because root's shell does not source the nix profile; a nixpkgs tarball because root has no channel."}
+      present: {sudo: true, command: "grep -q '^ssl-cert-file' /etc/nix/nix.conf 2>/dev/null || echo 'ssl-cert-file = /etc/ssl/cert.pem' | sudo tee -a /etc/nix/nix.conf >/dev/null; sudo launchctl kickstart -k system/org.nixos.nix-daemon", manual: "nix fetches through its own nss-cacert package, and upstream NSS (3.126 on 2026-10-22) still carries the emSign root because Mozilla's root program has not removed it. Point the daemon and CLI at the cleaned system bundle instead; new shells also want NIX_SSL_CERT_FILE=/etc/ssl/cert.pem. Re-run nix-env -iA cacert once nixpkgs ships a bundle without the root."}
 
   - id: conda-env-bundle
     table: ca_bundles

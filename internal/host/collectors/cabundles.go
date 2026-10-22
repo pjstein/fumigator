@@ -40,6 +40,17 @@ func (caBundles) Collect(opt table.Options) ([]table.Row, error) {
 		"/nix/var/nix/profiles/default/etc/ssl/certs/ca-bundle.crt": "nix",
 		"/usr/local/aws-cli/awscli/botocore/cacert.pem":             "aws-cli",
 	}
+	// nix: ssl-cert-file in nix.conf overrides the profile's cacert for the daemon and CLI
+	if b, err := os.ReadFile("/etc/nix/nix.conf"); err == nil {
+		for l := range strings.SplitSeq(string(b), "\n") {
+			if k, v, ok := strings.Cut(l, "="); ok && strings.TrimSpace(k) == "ssl-cert-file" {
+				if f := strings.TrimSpace(v); table.Exists(f) {
+					cands["/nix/var/nix/profiles/default/etc/ssl/certs/ca-bundle.crt"] = "nix:unused"
+					cands[f] = "nix:custom"
+				}
+			}
+		}
+	}
 	if out, ok := table.Sh("python3", "-c", "import certifi; print(certifi.where())"); ok {
 		cands[out] = "certifi:python3"
 	}
