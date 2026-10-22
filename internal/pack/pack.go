@@ -5,6 +5,7 @@ package pack
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -144,12 +145,20 @@ var validTypes = map[string]bool{"regex-version": true, "content": true, "pair":
 var validFix = map[string]bool{"rewrite": true, "insert-after": true, "tool": true, "manual": true, "none": true}
 var validSev = map[string]bool{"critical": true, "high": true, "medium": true, "low": true, "info": true}
 
+// Embedded is the packs filesystem compiled into the binary (packs/<id>/pack.yaml), set by
+// the main package. Packs on disk take precedence; this is the fallback for a bare binary.
+var Embedded fs.FS
+
 // Load reads <dir>/pack.yaml and compiles every pattern.
 func Load(dir string) (*Pack, error) {
 	b, err := os.ReadFile(filepath.Join(dir, "pack.yaml"))
 	if err != nil {
 		return nil, err
 	}
+	return parse(b, dir)
+}
+
+func parse(b []byte, dir string) (*Pack, error) {
 	var p Pack
 	if err := yaml.Unmarshal(b, &p); err != nil {
 		return nil, fmt.Errorf("%s: %w", dir, err)
@@ -161,12 +170,47 @@ func Load(dir string) (*Pack, error) {
 	return &p, nil
 }
 
-// Find resolves a pack reference: a directory, or an id under packsDir.
+// Find resolves a pack reference: a directory, an id under packsDir, or an embedded id.
 func Find(packsDir, ref string) (*Pack, error) {
 	if st, err := os.Stat(ref); err == nil && st.IsDir() {
 		return Load(ref)
 	}
-	return Load(filepath.Join(packsDir, ref))
+	if p, err := Load(filepath.Join(packsDir, ref)); err == nil {
+		return p, nil
+	}
+	if Embedded != nil {
+		if b, err := fs.ReadFile(Embedded, "packs/"+ref+"/pack.yaml"); err == nil {
+			return parse(b, "embedded:"+ref)
+		}
+	}
+	return nil, fmt.Errorf("pack %q: not under %s and not built in (fumigator list)", ref, packsDir)
+}
+
+// List returns every pack id available: on disk under packsDir first, then embedded ones
+// not shadowed by a directory of the same id.
+func List(packsDir string) []string {
+	seen := map[string]bool{}
+	var out []string
+	if ents, err := os.ReadDir(packsDir); err == nil {
+		for _, e := range ents {
+			if e.IsDir() && !seen[e.Name()] {
+				seen[e.Name()] = true
+				out = append(out, e.Name())
+			}
+		}
+	}
+	if Embedded != nil {
+		if ents, err := fs.ReadDir(Embedded, "packs"); err == nil {
+			for _, e := range ents {
+				if e.IsDir() && !seen[e.Name()] {
+					seen[e.Name()] = true
+					out = append(out, e.Name())
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (p *Pack) compile() error {

@@ -64,4 +64,4 @@ https://dv-g3b-aaa-emudhra.we-have-a-problem.com/    Sectigo AAA cross-sign
 ```
 
 Then `curl -sSI https://github.com https://pypi.org >/dev/null && echo fine` to prove you did
-not over-block. Image and runtime recipes are in `skills/ca-php-remediation/references/verify.md`.
+not over-block. Image and runtime recipes are in `references/verify.md`.

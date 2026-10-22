@@ -2,3 +2,4 @@ bin/
 dist/
 findings/
 skills/*.skill
+HANDOFF*.md

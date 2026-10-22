@@ -1,7 +1,7 @@
 # Fumigator architecture
 
-Status: implemented through step 3 of the migration order, 2026-10-22. The Python skill under
-`skills/ca-php-remediation/` is superseded for scan and fix and kept for reference.
+Status: implemented, 2026-10-22. The Python scripts this grew out of are gone; their logic
+lives in the two packs and in `internal/fix`.
 
 ## The problem shape
 

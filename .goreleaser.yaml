@@ -1,0 +1,41 @@
+version: 2
+project_name: fumigator
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: fumigator
+    main: ./cmd/fumigator
+    binary: fumigator
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    # fumigator_Darwin_arm64.tar.gz: matches `uname -s`/`uname -m` on macOS and Linux
+    name_template: >-
+      {{ .ProjectName }}_{{ title .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+      - packs/*/pack.yaml
+      - skills/**
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude: ["^style:", "^docs:"]
+
+release:
+  draft: false
+  prerelease: auto

@@ -1,6 +1,6 @@
 # PR body shape
 
-`remediate_repo.py --pr` generates this. If an agent writes or edits a PR body by hand, keep the
+`fumigator fix --pr` generates this. If an agent writes or edits a PR body by hand, keep the
 same four sections and the same register: a reviewer will see a dozen of these in a week and
 should be able to read any one of them in a minute.
 
@@ -44,5 +44,5 @@ Rules the generator follows and a hand-written body should too:
   issue. They are the PR's real content when the automatic edits are small.
 - No speculation about whether the repo was attacked. The scanner can't know; say what was
   exposed and what is now fixed.
-- Branch name is always `sec/emudhra-php2shell-2026-10` so the org can find them all with
-  `gh search prs --owner ORG head:sec/emudhra-php2shell-2026-10`.
+- Branch name is always `sec/<pack-id>` and the title starts `fix(security):`, so the org can find
+  them all with `gh search prs --owner ORG head:sec/<pack-id>`.

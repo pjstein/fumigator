@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	fumigator "github.com/pjstein/fumigator"
 	"github.com/pjstein/fumigator/internal/discover"
 	"github.com/pjstein/fumigator/internal/engine"
 	"github.com/pjstein/fumigator/internal/findings"
@@ -29,7 +31,11 @@ import (
 	"github.com/pjstein/fumigator/internal/pack"
 )
 
+// version is set by goreleaser (-X main.version=...).
+var version = "dev"
+
 func main() {
+	pack.Embedded = fumigator.Packs
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
@@ -47,7 +53,11 @@ func main() {
 	case "pack":
 		err = cmdPack(os.Args[2:])
 	case "list":
-		err = cmdList(os.Args[2:])
+		cmdList(os.Args[2:])
+	case "skills":
+		err = cmdSkills(os.Args[2:])
+	case "version", "--version", "-v":
+		fmt.Println("fumigator", version)
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -70,6 +80,7 @@ func usage() {
   fumigator pack  test [PACK...]
   fumigator pack  lint [PACK...]
   fumigator list
+  fumigator skills install [--dir ~/.claude/skills]     copy the agent skills out of the binary
 `)
 }
 
@@ -110,25 +121,55 @@ func loadPacks(dir string, refs []string) ([]*pack.Pack, error) {
 	return out, nil
 }
 
-func cmdList(args []string) error {
+func cmdList(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	pd := packsDir(fs)
 	_ = fs.Parse(args) // ExitOnError: never returns an error
-	ents, err := os.ReadDir(*pd)
+	for _, id := range pack.List(*pd) {
+		p, err := pack.Find(*pd, id)
+		if err != nil {
+			fmt.Printf("%-28s INVALID: %v\n", id, err)
+			continue
+		}
+		where := "embedded"
+		if !strings.HasPrefix(p.Dir, "embedded:") {
+			where = p.Dir
+		}
+		fmt.Printf("%-28s %s  (%d detectors, %d host checks, updated %s) [%s]\n", p.ID, p.Title, len(p.Detectors), len(p.Host), p.Updated, where)
+	}
+}
+
+func cmdSkills(args []string) error {
+	if len(args) < 1 || args[0] != "install" {
+		return fmt.Errorf("usage: fumigator skills install [--dir DIR]")
+	}
+	fs := flag.NewFlagSet("skills install", flag.ExitOnError)
+	home, _ := os.UserHomeDir()
+	dir := fs.String("dir", filepath.Join(home, ".claude", "skills"), "skills directory")
+	_ = fs.Parse(args[1:]) // ExitOnError
+	n := 0
+	err := iofs.WalkDir(fumigator.Skills, "skills", func(p string, d iofs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := iofs.ReadFile(fumigator.Skills, p)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(*dir, strings.TrimPrefix(p, "skills/"))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, b, 0o644); err != nil {
+			return err
+		}
+		n++
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	for _, e := range ents {
-		if !e.IsDir() {
-			continue
-		}
-		p, err := pack.Load(filepath.Join(*pd, e.Name()))
-		if err != nil {
-			fmt.Printf("%-28s INVALID: %v\n", e.Name(), err)
-			continue
-		}
-		fmt.Printf("%-28s %s  (%d detectors, updated %s)\n", p.ID, p.Title, len(p.Detectors), p.Updated)
-	}
+	fmt.Printf("installed %d files under %s\n", n, *dir)
 	return nil
 }
 
@@ -583,15 +624,7 @@ func cmdPack(args []string) error {
 	_ = fs.Parse(args[1:]) // ExitOnError
 	refs := fs.Args()
 	if len(refs) == 0 {
-		ents, err := os.ReadDir(*pd)
-		if err != nil {
-			return err
-		}
-		for _, e := range ents {
-			if e.IsDir() {
-				refs = append(refs, e.Name())
-			}
-		}
+		refs = pack.List(*pd)
 	}
 	failed := 0
 	for _, r := range refs {
@@ -622,6 +655,9 @@ func cmdPack(args []string) error {
 // tuples with testdata/expected.json. Missing expected.json is a failure: a pack with no
 // fixture does not ship.
 func testPack(p *pack.Pack) error {
+	if strings.HasPrefix(p.Dir, "embedded:") {
+		return fmt.Errorf("embedded pack has no fixture on disk; run from a checkout")
+	}
 	td := filepath.Join(p.Dir, "testdata")
 	repo := filepath.Join(td, "repo")
 	if st, err := os.Stat(repo); err != nil || !st.IsDir() {
