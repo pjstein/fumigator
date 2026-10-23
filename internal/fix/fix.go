@@ -581,8 +581,13 @@ func (r *remediator) commitAndPR(name string) {
 		r.note("nothing to change; no PR")
 		return
 	}
-	// no commits ahead of base: nothing to push, so no PR
-	if r.opt.Base != "" && gitErr(repo, "diff", "--quiet", r.opt.Base, "HEAD") == nil {
+	// no changes against the remote base: nothing to push, so no PR. Compare with the
+	// freshly fetched remote base, not the local branch, which may be stale.
+	baseRef := r.opt.Base
+	if r.opt.Base != "" && gitErr(repo, "fetch", "-q", "origin", r.opt.Base) == nil {
+		baseRef = "FETCH_HEAD"
+	}
+	if r.opt.Base != "" && gitErr(repo, "diff", "--quiet", baseRef, "HEAD") == nil {
 		r.res.ManualOnly = true
 		r.note("manual items only, no file changes: no PR; body at " + bp + " for an issue")
 		_ = gitErr(repo, "checkout", "-q", r.opt.Base)
