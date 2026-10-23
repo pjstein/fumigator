@@ -92,7 +92,7 @@ detectors:
     # a bare distro FROM with no ca-certificates step in the same stage
     type: absent
     files: ["Dockerfile", "Dockerfile.*", "*.dockerfile", "Containerfile"]
-    trigger: '(?i)^\s*FROM\s+(?:--platform=\S+\s+)?(?:[\w.-]+/)*(?:alpine|debian|ubuntu|python|pypy|nginx|httpd|caddy|haproxy|traefik|openresty/openresty)(?::[^\s$]+)?(?:\s+AS\s+\S+)?\s*$'
+    trigger: '(?i)^\s*FROM\s+(?:--platform=\S+\s+)?(?:[\w.-]+/)*(?:alpine|debian|ubuntu|python|pypy|nginx|httpd|caddy|haproxy|traefik|openresty/openresty|pytorch/pytorch|nvidia/cuda|tensorflow/tensorflow)(?::[^\s$]+)?(?:\s+AS\s+\S+)?\s*$'
     require: '^\s*RUN\b.*(ca-certificates|update-ca-trust|update-ca-certificates|pip3?\s+install.*certifi)'
     severity: {absent: high}
     fix:

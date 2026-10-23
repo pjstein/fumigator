@@ -387,10 +387,11 @@ func absent(_ *pack.Pack, d *pack.Detector, lines []string) []findings.Finding {
 		if i+1 < len(starts) {
 			end = starts[i+1]
 		}
-		if w := d.WhenRe(); w != nil && !slices.ContainsFunc(lines[s:end], w.MatchString) {
+		block := logicalLines(lines[s:end])
+		if w := d.WhenRe(); w != nil && !slices.ContainsFunc(block, w.MatchString) {
 			continue // the condition does not apply to this block
 		}
-		found := slices.ContainsFunc(lines[s:end], req.MatchString)
+		found := slices.ContainsFunc(block, req.MatchString)
 		state := findings.OK
 		if !found {
 			state = findings.Absent
@@ -400,6 +401,25 @@ func absent(_ *pack.Pack, d *pack.Detector, lines []string) []findings.Finding {
 			Line: s + 1, State: state, Current: strings.TrimSpace(lines[s]), Match: lines[s],
 			Severity: d.SeverityFor(string(state)), Fix: fx.Kind, FixText: firstNonEmpty(fx.To, fx.Command),
 		})
+	}
+	return out
+}
+
+// logicalLines joins backslash-continued lines, so a requirement on a RUN instruction is met
+// whichever physical line of the instruction it appears on.
+func logicalLines(lines []string) []string {
+	var out []string
+	cur := ""
+	for _, l := range lines {
+		if head, ok := strings.CutSuffix(strings.TrimRight(l, " \t"), "\\"); ok {
+			cur += head + " "
+			continue
+		}
+		out = append(out, cur+l)
+		cur = ""
+	}
+	if cur != "" {
+		out = append(out, cur)
 	}
 	return out
 }

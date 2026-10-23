@@ -385,14 +385,17 @@ if command -v python3 >/dev/null 2>&1; then
   python3 -c "from botocore.httpsession import get_cert_path; print('USES botocore', get_cert_path(True))" 2>/dev/null
 fi
 if [ -n "$CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE" ]; then echo "USES gcloud $CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE"; fi
+empty=$(mktemp -d 2>/dev/null || { mkdir -p /tmp/fumigator-empty; echo /tmp/fumigator-empty; })
 seen=""
 for f in $(find / -xdev -type f \( -name cacert.pem -o -name roots.pem -o -name cacerts.txt -o -name ca-bundle.crt -o -name ca-certificates.crt -o -name tls-ca-bundle.pem -o -name cert.pem \) -size -4096k 2>/dev/null | grep -vE '/(tests?|testdata|fixtures|dummyserver)/' | head -60); do
   h=$(cksum "$f" 2>/dev/null | cut -d' ' -f1-2); case " $seen " in *" $h "*) continue;; esac; seen="$seen $h"
   grep -q 'BEGIN CERTIFICATE' "$f" 2>/dev/null || continue
   for u in "$@"; do
-    if command -v curl >/dev/null 2>&1; then curl -sSf --max-time 15 --cacert "$f" -o /dev/null "$u" 2>/dev/null && ok_fetch bundle "$f" "$u" || ok_reject bundle "$f" "$u";
+    # --capath to an empty dir: Debian/Ubuntu curl otherwise adds /etc/ssl/certs to --cacert,
+    # so every bundle would inherit the system store's verdict
+    if command -v curl >/dev/null 2>&1; then curl -sSf --max-time 15 --cacert "$f" --capath "$empty" -o /dev/null "$u" 2>/dev/null && ok_fetch bundle "$f" "$u" || ok_reject bundle "$f" "$u";
     elif command -v python3 >/dev/null 2>&1; then python3 -c "import sys,ssl,urllib.request; urllib.request.urlopen(sys.argv[1],timeout=15,context=ssl.create_default_context(cafile=sys.argv[2]))" "$u" "$f" 2>/dev/null && ok_fetch bundle "$f" "$u" || ok_reject bundle "$f" "$u";
-    elif command -v wget >/dev/null 2>&1; then wget -q -T 15 --ca-certificate="$f" -O /dev/null "$u" 2>/dev/null && ok_fetch bundle "$f" "$u" || ok_reject bundle "$f" "$u";
+    elif command -v wget >/dev/null 2>&1; then wget -q -T 15 --ca-certificate="$f" --ca-directory="$empty" -O /dev/null "$u" 2>/dev/null && ok_fetch bundle "$f" "$u" || ok_reject bundle "$f" "$u";
     elif grep -q -e 'emSign ECC Root CA - G3' -e 'AAA Certificate Services' "$f"; then ok_fetch bundle "$f" "$u";
     else ok_reject bundle "$f" "$u"; fi
   done

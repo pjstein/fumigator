@@ -144,6 +144,14 @@
   "Fixed": ""
  },
  {
+  "Detector": "base-image-ca-upgrade",
+  "File": "Dockerfile.gpu",
+  "Line": 1,
+  "State": "absent",
+  "Current": "FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel",
+  "Fixed": ""
+ },
+ {
   "Detector": "composer-lock-ca-bundle",
   "File": "composer.lock",
   "Line": 4,
