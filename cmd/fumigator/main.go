@@ -81,6 +81,7 @@ func usage() {
   fumigator host  --pack ID [--pack ID...] [--apply] [--only id,..] [--venv-roots DIR,..] [--out DIR] [--tables]
   fumigator gh    sync --org ORG [--workers N] [--depth N] DEST
   fumigator pr    ready  --pack ID --findings DIR [--no-checks]   un-draft PRs from fix-log.md whose checks all pass
+  fumigator pr    probe  --pack ID --image TAG                  probe one built image (every client and CA bundle in it)
   fumigator pr    verify --pack ID --findings DIR [--only name,..] [--ready] [--build-timeout 15m]
                   run each green PR's verify checklist (docker build of touched Dockerfiles, in-image probe) and tick it
   fumigator pack  test [PACK...]
@@ -594,6 +595,9 @@ func cmdPR(args []string) error {
 	if len(args) >= 1 && args[0] == "verify" {
 		return cmdPRVerify(args[1:])
 	}
+	if len(args) >= 1 && args[0] == "probe" {
+		return cmdProbe(args[1:])
+	}
 	if len(args) < 1 || args[0] != "ready" {
 		return fmt.Errorf("usage: fumigator pr ready|verify --pack ID --findings DIR")
 	}
@@ -644,6 +648,38 @@ func cmdPR(args []string) error {
 		}
 	}
 	fmt.Printf("ready now: %d  already ready: %d  left draft: %d  merged: %d  closed: %d  failed: %d\n", counts["ready"], counts["already-ready"], counts["left-draft"], counts["merged"], counts["closed"], counts["failed"])
+	return nil
+}
+
+// cmdProbe runs the in-image trust probe against an already built image: every TLS client and
+// every CA bundle file in it must refuse the pack's test hosts.
+func cmdProbe(args []string) error {
+	fs := flag.NewFlagSet("pr probe", flag.ExitOnError)
+	packRef := fs.String("pack", "", "pack id")
+	img := fs.String("image", "", "image tag to probe")
+	pd := packsDir(fs)
+	_ = fs.Parse(args) // ExitOnError
+	if *packRef == "" || *img == "" {
+		return fmt.Errorf("usage: fumigator pr probe --pack ID --image TAG")
+	}
+	p, err := pack.Find(*pd, *packRef)
+	if err != nil {
+		return err
+	}
+	failed := false
+	for _, st := range verify.ProbeImage(*img, *img, verify.ProbeURLs(p)) {
+		mark := "skip"
+		switch {
+		case st.Ran && st.Passed:
+			mark = "pass"
+		case st.Ran:
+			mark, failed = "FAIL", true
+		}
+		fmt.Printf("  %-4s %s  (%s)\n", mark, st.Item, st.Detail)
+	}
+	if failed {
+		return fmt.Errorf("%s still trusts the chain", *img)
+	}
 	return nil
 }
 

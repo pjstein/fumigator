@@ -418,6 +418,13 @@ func bypassed(path string, uses map[string]string) string {
 	return ""
 }
 
+// ProbeImage is the exported form of probeImage, for probing an image that was built outside
+// `pr verify` (a repo whose build needs a step before docker build).
+func ProbeImage(tag, label string, urls []string) []Step { return probeImage(tag, label, urls) }
+
+// ProbeURLs exposes the pack's test hosts.
+func ProbeURLs(p *pack.Pack) []string { return probeURLs(p) }
+
 // probeImage runs probeScript in the image and turns its lines into one checklist step per URL.
 // A URL passes when every client and every bundle (other than pip's private copy) rejects it.
 func probeImage(tag, df string, urls []string) []Step {
