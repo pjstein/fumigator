@@ -377,14 +377,24 @@ func (r *remediator) insertAfter(f findings.Finding) {
 		return
 	}
 	lines := r.files[f.File]
-	text := f.FixText + "  # " + r.p.ID + ": " + r.p.Advisory
-	if i+1 < len(lines) && lines[i+1] == text {
+	// never split a multi-line instruction: insert after its last continuation line
+	for i+1 < len(lines) && strings.HasSuffix(strings.TrimRight(lines[i], " \t"), "\\") {
+		i++
+	}
+	// Provenance goes inline only on RUN, where the shell reads "#" as a comment; ENV, ARG,
+	// COPY and the rest have no inline comments, so it goes on its own line above.
+	note := "# " + r.p.ID + ": " + r.p.Advisory
+	ins := []string{note, f.FixText}
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(f.FixText)), "RUN ") {
+		ins = []string{f.FixText + "  " + note}
+	}
+	if i+len(ins) < len(lines) && slices.Equal(lines[i+1:i+1+len(ins)], ins) {
 		return // idempotent re-run
 	}
-	lines = append(lines[:i+1], append([]string{text}, lines[i+1:]...)...)
+	lines = append(lines[:i+1], append(ins, lines[i+1:]...)...)
 	r.files[f.File] = lines
 	r.dirty[f.File] = true
-	r.res.Edits = append(r.res.Edits, Edit{f.File, i + 2, "", text, why(f)})
+	r.res.Edits = append(r.res.Edits, Edit{f.File, i + 1 + len(ins), "", strings.Join(ins, " / "), why(f)})
 }
 
 func (r *remediator) flush() {

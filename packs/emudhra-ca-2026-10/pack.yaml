@@ -370,15 +370,16 @@ detectors:
       vulnerable: {kind: tool, command: "go get golang.org/x/crypto/x509roots/fallback@latest && go mod tidy"}
     note: "x509roots/fallback compiles a root bundle into the binary and is the only trust store in scratch or distroless images; a snapshot older than 2026-10-19 trusts the chain."
 
-  - id: gcloud-image-bundles
+  - id: gcloud-sdk-bundles
     type: absent
     files: ["Dockerfile", "Dockerfile.*", "*.dockerfile", "Containerfile"]
-    trigger: '(?i)^\s*FROM\s+(?:--platform=\S+\s+)?\S*(?:google/cloud-sdk|cloudsdktool/(?:google-)?cloud-(?:sdk|cli))\S*(?:\s+AS\s+\S+)?\s*$'
-    require: 'custom_ca_certs_file'
+    trigger: '(?i)^\s*FROM\s+\S+'
+    when: '(?i)google-cloud-(?:cli|sdk)|/google-cloud-sdk\b|cloudsdktool/'
+    require: 'CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE'
     severity: {absent: medium}
     fix:
-      absent: {kind: insert-after, to: "RUN gcloud config set core/custom_ca_certs_file /etc/ssl/certs/ca-certificates.crt"}
-    note: "The Cloud SDK image carries its own certifi, botocore and httplib2 bundles, which `gcloud components update` does not refresh; pointing gcloud at the image's system bundle makes gcloud, gsutil and bq use the patched store."
+      absent: {kind: insert-after, to: "ENV CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=/etc/ssl/certs/ca-certificates.crt"}
+    note: "A stage that installs the Cloud SDK (apt google-cloud-cli, a cloudsdktool base, or COPY of /google-cloud-sdk) carries the SDK's own certifi, botocore and httplib2 bundles, which `gcloud components update` does not refresh. The environment variable points gcloud, gsutil and bq at the image's patched system bundle for every user; `gcloud config set` would only apply to the user and stage that ran it."
 
   # ---- vendored trust stores ----
   - id: vendored-ca-bundle

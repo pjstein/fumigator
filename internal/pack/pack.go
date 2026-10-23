@@ -80,14 +80,15 @@ type Detector struct {
 	// absent
 	Trigger string `yaml:"trigger"`
 	Require string `yaml:"require"`
+	When    string `yaml:"when"` // optional: only blocks containing a line matching this are checked
 
 	Severity map[string]string `yaml:"severity"` // state -> severity
 	Fix      map[string]Fix    `yaml:"fix"`      // state -> fix
 
 	// compiled
-	re, nameRe, verRe, trigRe, reqRe, afterRe *regexp.Regexp
-	anyRe                                     []*regexp.Regexp
-	anyLit                                    []string
+	re, nameRe, verRe, trigRe, reqRe, afterRe, whenRe *regexp.Regexp
+	anyRe                                             []*regexp.Regexp
+	anyLit                                            []string
 }
 
 type Fix struct {
@@ -310,6 +311,11 @@ func (p *Pack) compile() error {
 			if d.reqRe, err = regexp.Compile(d.Require); err != nil {
 				return fmt.Errorf("%s: require: %w", d.ID, err)
 			}
+			if d.When != "" {
+				if d.whenRe, err = regexp.Compile(d.When); err != nil {
+					return fmt.Errorf("%s: when: %w", d.ID, err)
+				}
+			}
 		}
 		for st, s := range d.Severity {
 			if !validSev[s] {
@@ -412,6 +418,7 @@ func (d *Detector) VerRe() *regexp.Regexp   { return d.verRe }
 func (d *Detector) TrigRe() *regexp.Regexp  { return d.trigRe }
 func (d *Detector) ReqRe() *regexp.Regexp   { return d.reqRe }
 func (d *Detector) AfterRe() *regexp.Regexp { return d.afterRe }
+func (d *Detector) WhenRe() *regexp.Regexp  { return d.whenRe }
 func (d *Detector) AnyRe() []*regexp.Regexp { return d.anyRe }
 func (d *Detector) AnyLit() []string        { return d.anyLit }
 

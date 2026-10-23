@@ -101,8 +101,10 @@ lockfile bump changes the image even when the Dockerfile does not). Inside each 
 it fetches the advisory's test hosts with every TLS client present (curl or wget, Python's
 default context, certifi, Node, Java), then with every CA bundle file on disk as an explicit
 trust store: certifi, gRPC's `roots.pem`, httplib2, botocore, the system bundle. The image
-passes only if all of them refuse. pip's private vendored certifi is reported but not
-counted, since only pip reads it. It ticks what passed and appends a dated
+passes only if every bundle the image actually uses refuses. A bundle that is present but
+bypassed is reported, not counted: pip's private certifi (only pip installs read it), an
+httplib2 or botocore fallback when the library resolves to certifi, and the Cloud SDK's
+copies when `CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE` points gcloud at the system bundle. It ticks what passed and appends a dated
 "Verification run" section; a failed build is retried from the repository root (the usual
 context for monorepos) and on the base branch, so the body says whether the PR broke it.
 Re-runs replace the section.
@@ -118,7 +120,7 @@ found so far:
 | Language runtime | Node, Go, Deno, Bun, Java keystores, Electron apps | version pins, image tags, host checks |
 | Python package | certifi, **grpcio** (`roots.pem`, ignores certifi), pip's vendored certifi | lockfile and requirements rules, host checks |
 | Compiled into a binary | Rust `webpki-roots`, Go `x509roots/fallback`, uv, any CLI built with rustls | lockfile rules, image tags, host binary scan |
-| Bundled by an SDK or app | gcloud (certifi, botocore, httplib2 copies), AWS CLI, conda envs, `.app` bundles | host bundle scan, gcloud image rule |
+| Bundled by an SDK or app | gcloud (certifi, botocore, httplib2 copies), AWS CLI, conda envs, `.app` bundles | host bundle scan; any image stage that installs or copies the Cloud SDK gets `ENV CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE` |
 | Vendored into a repo | a `cacert.pem` checked in | content rule |
 
 httplib2 and botocore fall back to their own bundles only when certifi is not installed. The

@@ -387,6 +387,9 @@ func absent(_ *pack.Pack, d *pack.Detector, lines []string) []findings.Finding {
 		if i+1 < len(starts) {
 			end = starts[i+1]
 		}
+		if w := d.WhenRe(); w != nil && !slices.ContainsFunc(lines[s:end], w.MatchString) {
+			continue // the condition does not apply to this block
+		}
 		found := slices.ContainsFunc(lines[s:end], req.MatchString)
 		state := findings.OK
 		if !found {

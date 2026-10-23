@@ -379,6 +379,12 @@ for u in "$@"; do
     (cd "$d" && java T.java "$u" >/dev/null 2>&1) && ok_fetch client java "$u" || ok_reject client java "$u"
   fi
 done
+# which bundle do libraries with a private fallback actually use?
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "import httplib2; print('USES httplib2', httplib2.CA_CERTS)" 2>/dev/null
+  python3 -c "from botocore.httpsession import get_cert_path; print('USES botocore', get_cert_path(True))" 2>/dev/null
+fi
+if [ -n "$CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE" ]; then echo "USES gcloud $CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE"; fi
 seen=""
 for f in $(find / -xdev -type f \( -name cacert.pem -o -name roots.pem -o -name cacerts.txt -o -name ca-bundle.crt -o -name ca-certificates.crt -o -name tls-ca-bundle.pem -o -name cert.pem \) -size -4096k 2>/dev/null | grep -vE '/(tests?|testdata|fixtures|dummyserver)/' | head -60); do
   h=$(cksum "$f" 2>/dev/null | cut -d' ' -f1-2); case " $seen " in *" $h "*) continue;; esac; seen="$seen $h"
@@ -394,10 +400,22 @@ done
 echo DONE
 `
 
-// pipVendored reports bundles that only pip itself reads (pip's private certifi copy): shown in
-// the detail, not counted against the image, because nothing but pip installs uses them.
-func pipVendored(path string) bool {
-	return strings.Contains(path, "/pip/_vendor/")
+// bypassed reports a bundle the image never reads, with the reason: pip's private certifi
+// copy (only pip installs read it), an httplib2 or botocore fallback when the library resolves
+// to another file (certifi), and the Cloud SDK's copies when CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE
+// points gcloud elsewhere. Bypassed bundles are reported, not counted against the image.
+func bypassed(path string, uses map[string]string) string {
+	switch {
+	case strings.Contains(path, "/pip/_vendor/"):
+		return "pip's own vendored copy, read only by pip installs"
+	case strings.Contains(path, "/google-cloud-sdk/") && uses["gcloud"] != "":
+		return "Cloud SDK copy, bypassed by CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=" + uses["gcloud"]
+	case strings.Contains(path, "/httplib2/") && uses["httplib2"] != "" && uses["httplib2"] != path:
+		return "httplib2 fallback, unused: httplib2 resolves to " + uses["httplib2"]
+	case strings.Contains(path, "/botocore/") && uses["botocore"] != "" && uses["botocore"] != path:
+		return "botocore fallback, unused: botocore resolves to " + uses["botocore"]
+	}
+	return ""
 }
 
 // probeImage runs probeScript in the image and turns its lines into one checklist step per URL.
@@ -408,14 +426,21 @@ func probeImage(tag, df string, urls []string) []Step {
 	args := append([]string{"run", "--rm", "--user", "0", "--entrypoint", "sh", tag, "-c", probeScript, "sh"}, urls...)
 	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	type res struct {
-		checked             int
-		fetched, pipFetched []string
+		checked    int
+		fetched    []string
+		pipFetched []string // bypassed bundles that still list the roots, with the reason
 	}
 	per := map[string]*res{}
 	for _, u := range urls {
 		per[u] = &res{}
 	}
 	done := false
+	uses := map[string]string{}
+	for l := range strings.SplitSeq(string(out), "\n") {
+		if f := strings.Fields(l); len(f) == 3 && f[0] == "USES" {
+			uses[f[1]] = f[2]
+		}
+	}
 	for l := range strings.SplitSeq(string(out), "\n") {
 		f := strings.Fields(l)
 		if len(f) == 1 && f[0] == "DONE" {
@@ -431,8 +456,8 @@ func probeImage(tag, df string, urls []string) []Step {
 		r.checked++
 		if f[4] == "FETCHED" {
 			label := f[2]
-			if f[1] == "bundle" && pipVendored(f[2]) {
-				r.pipFetched = append(r.pipFetched, label)
+			if why := bypassed(f[2], uses); f[1] == "bundle" && why != "" {
+				r.pipFetched = append(r.pipFetched, label+" ("+why+")")
 			} else {
 				r.fetched = append(r.fetched, f[1]+" "+label)
 			}
@@ -459,7 +484,7 @@ func probeImage(tag, df string, urls []string) []Step {
 			st.Detail = fmt.Sprintf("rejected by all %d client and bundle checks in %s", r.checked-len(r.pipFetched), df)
 		}
 		if len(r.pipFetched) > 0 {
-			st.Detail += ". pip's own vendored copy still trusts it (" + strings.Join(r.pipFetched, ", ") + "); only pip installs read it, upgrade pip in the image"
+			st.Detail += ". Unused bundles that still list the roots: " + strings.Join(r.pipFetched, "; ")
 		}
 		steps = append(steps, st)
 	}

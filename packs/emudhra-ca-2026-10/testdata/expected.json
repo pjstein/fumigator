@@ -120,6 +120,30 @@
   "Fixed": ""
  },
  {
+  "Detector": "base-image-ca-upgrade",
+  "File": "Dockerfile.gcloud",
+  "Line": 4,
+  "State": "absent",
+  "Current": "FROM python:3.13-slim",
+  "Fixed": ""
+ },
+ {
+  "Detector": "base-image-ca-upgrade",
+  "File": "Dockerfile.gcloud",
+  "Line": 8,
+  "State": "absent",
+  "Current": "FROM python:3.13-slim AS runtime",
+  "Fixed": ""
+ },
+ {
+  "Detector": "base-image-ca-upgrade",
+  "File": "Dockerfile.gcloud",
+  "Line": 11,
+  "State": "absent",
+  "Current": "FROM alpine:3.20 AS plain",
+  "Fixed": ""
+ },
+ {
   "Detector": "composer-lock-ca-bundle",
   "File": "composer.lock",
   "Line": 4,
@@ -208,11 +232,11 @@
   "Fixed": ""
  },
  {
-  "Detector": "gcloud-image-bundles",
+  "Detector": "gcloud-sdk-bundles",
   "File": "Dockerfile.gcloud",
   "Line": 1,
   "State": "absent",
-  "Current": "FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:576.0.0-slim",
+  "Current": "FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:576.0.0-slim AS sdk",
   "Fixed": ""
  },
  {
@@ -222,6 +246,14 @@
   "State": "vulnerable",
   "Current": "0.5.9",
   "Fixed": "0.13.4"
+ },
+ {
+  "Detector": "gcloud-sdk-bundles",
+  "File": "Dockerfile.gcloud",
+  "Line": 4,
+  "State": "absent",
+  "Current": "FROM python:3.13-slim",
+  "Fixed": ""
  },
  {
   "Detector": "go-mod-language-line",
