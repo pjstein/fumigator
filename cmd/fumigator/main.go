@@ -299,6 +299,7 @@ func cmdFix(args []string) error {
 	runTools := fs.Bool("run-tools", false, "run lockfile tool commands that are on PATH")
 	pr := fs.Bool("pr", false, "commit, push and open a PR (implies --apply)")
 	draft := fs.Bool("draft", false, "open PRs as drafts")
+	trailer := fs.String("trailer", os.Getenv("FUMIGATOR_COMMIT_TRAILER"), "commit trailer line, e.g. \"Co-Authored-By: Name <email>\" (default $FUMIGATOR_COMMIT_TRAILER, else none)")
 	only := fs.String("only", "", "comma-separated report names to include")
 	skip := fs.String("skip", "", "comma-separated report names to exclude")
 	branch := fs.String("branch", "", "branch name (default sec/<pack-id>)")
@@ -354,7 +355,7 @@ func cmdFix(args []string) error {
 			return nil
 		}
 		fmt.Printf("== %s (%s)\n", name, rep.Repo)
-		res := fix.Run(p, rep, fix.Options{Apply: *apply, RunTools: *runTools, PR: *pr, Branch: *branch, Base: *base, Draft: *draft})
+		res := fix.Run(p, rep, fix.Options{Apply: *apply, RunTools: *runTools, PR: *pr, Branch: *branch, Base: *base, Draft: *draft, Trailer: *trailer})
 		printResult(res, *apply)
 		fmt.Fprintf(&log, "## %s\n\n", name)
 		fmt.Fprintf(&log, "%s", describe(res, *apply))

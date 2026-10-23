@@ -124,6 +124,25 @@ func tailOf(s string) string {
 	return t
 }
 
+var lockVersionRe = regexp.MustCompile(`(?m)^lock-version = "([\d.]+)"`)
+
+// poetryCommand keeps a poetry.lock in its format: lock-version 2.0 (Poetry 1.x) is
+// regenerated with Poetry 1.8.5, which cannot write 2.1; 2.1 and later with the installed
+// Poetry. It also makes `poetry update` lock-only, so nothing is installed into a venv.
+func poetryCommand(cmd, lockPath string) string {
+	if strings.HasPrefix(strings.TrimSpace(cmd), "poetry update") && !strings.Contains(cmd, "--lock") {
+		cmd = strings.Replace(cmd, "poetry update", "poetry update --lock", 1)
+	}
+	b, err := os.ReadFile(lockPath)
+	if err != nil {
+		return cmd
+	}
+	if m := lockVersionRe.FindSubmatch(b); m != nil && (string(m[1]) == "2.0" || strings.HasPrefix(string(m[1]), "1.")) {
+		return strings.Replace(cmd, "poetry ", "uvx -q --from poetry==1.8.5 poetry ", 1)
+	}
+	return cmd
+}
+
 // packageOf returns the package name a lockfile finding is about ("grpcio 1.80.0" -> grpcio).
 func packageOf(current string) string {
 	if f := strings.Fields(current); len(f) > 0 {

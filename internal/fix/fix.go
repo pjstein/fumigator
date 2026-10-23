@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pjstein/fumigator/internal/engine"
 	"github.com/pjstein/fumigator/internal/findings"
 	"github.com/pjstein/fumigator/internal/pack"
 )
@@ -29,6 +30,7 @@ type Options struct {
 	Branch   string // default sec/<pack-id>
 	Base     string // default: current branch at apply time
 	Draft    bool   // open the PR as a draft
+	Trailer  string // optional commit trailer line(s), e.g. "Co-Authored-By: ..."; none by default
 }
 
 type Edit struct {
@@ -111,6 +113,9 @@ func Run(p *pack.Pack, rep *findings.RepoReport, opt Options) *Result {
 			r.res.Refused = why
 			return r.res
 		}
+		// Findings came from scanning the default branch; the PR branch may already resolve some
+		// of them (by an earlier run, a reviewer, or a hand edit). Act on the branch as it is.
+		rep = engine.ScanRepo(p, rep.Repo, engine.Options{})
 	}
 
 	// Apply in file order, descending line number, so insertions never shift a later edit.
@@ -123,6 +128,9 @@ func Run(p *pack.Pack, rep *findings.RepoReport, opt Options) *Result {
 	})
 	var tools []findings.Finding
 	for _, f := range fs {
+		if f.Severity == "info" {
+			continue // reported by scan, never an edit or a checklist item
+		}
 		switch f.Fix {
 		case "manual":
 			r.res.Manual = append(r.res.Manual, f)
@@ -443,6 +451,11 @@ func (r *remediator) runTools(tools []findings.Finding) {
 			r.undoPinsFor(rel, f)
 			continue
 		}
+		if filepath.Base(f.File) == "poetry.lock" {
+			cmd = poetryCommand(cmd, filepath.Join(r.repo, f.File))
+			tr.Command = cmd
+		}
+		orig, _ := os.ReadFile(filepath.Join(r.repo, f.File))
 		var runErr error
 		if filepath.Base(f.File) == "uv.lock" {
 			var ran string
@@ -457,6 +470,18 @@ func (r *remediator) runTools(tools []findings.Finding) {
 			c.Stdout, c.Stderr = &out, &out
 			if err := c.Run(); err != nil {
 				runErr = fmt.Errorf("%s", tailOf(out.String()))
+			}
+		}
+		if runErr == nil {
+			// a tool that exits 0 must also have reached the fix: re-scan the lockfile
+			after := engine.ScanFiles(r.p, r.repo, []string{f.File}, engine.Options{}, nil)
+			for _, g := range after.Findings {
+				if g.Detector == f.Detector && packageOf(g.Current) == packageOf(f.Current) && g.State == findings.Vulnerable {
+					runErr = fmt.Errorf("it ran, but %s only reached %s (fix: %s); lock restored", packageOf(g.Current), strings.TrimPrefix(g.Current, packageOf(g.Current)+" "), g.Fixed)
+					if orig != nil {
+						_ = os.WriteFile(filepath.Join(r.repo, f.File), orig, 0o644)
+					}
+				}
 			}
 		}
 		if runErr != nil {
@@ -531,7 +556,9 @@ func (r *remediator) commitAndPR(name string) {
 		for _, e := range r.res.Edits {
 			fmt.Fprintf(&b, "- %s:%d: %s -> %s\n", e.File, e.Line, trunc(e.Before, 50), trunc(e.After, 50))
 		}
-		b.WriteString("\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\n")
+		if t := strings.TrimSpace(r.opt.Trailer); t != "" {
+			b.WriteString("\n" + t + "\n")
+		}
 		if err := gitErr(repo, "commit", "-q", "-m", b.String()); err != nil {
 			r.res.Refused = "commit: " + err.Error()
 			return

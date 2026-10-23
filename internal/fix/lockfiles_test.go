@@ -1,6 +1,7 @@
 package fix
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,22 @@ func TestReplaceSection(t *testing.T) {
 	got = replaceSection(body, "Known caveats", "## Known caveats\n\n- c")
 	if !strings.Contains(got, "## Known caveats\n\n- c\n\n## Verify before merging") && !strings.Contains(got, "## Known caveats\n\n- c\n## Verify") {
 		t.Errorf("add section before verify:\n%s", got)
+	}
+}
+
+func TestPoetryCommand(t *testing.T) {
+	dir := t.TempDir()
+	write := func(v string) string {
+		p := dir + "/poetry.lock"
+		if err := os.WriteFile(p, []byte("[metadata]\nlock-version = \""+v+"\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if got := poetryCommand("poetry update certifi", write("2.0")); got != "uvx -q --from poetry==1.8.5 poetry update --lock certifi" {
+		t.Errorf("2.0: %q", got)
+	}
+	if got := poetryCommand("poetry update --lock certifi", write("2.1")); got != "poetry update --lock certifi" {
+		t.Errorf("2.1: %q", got)
 	}
 }

@@ -1,0 +1,6 @@
+{
+  "name": "generated-connector",
+  "engines": {
+    "node": ">=18.0"
+  }
+}

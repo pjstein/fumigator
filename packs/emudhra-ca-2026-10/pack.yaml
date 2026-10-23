@@ -176,7 +176,9 @@ detectors:
   - id: package-json-engines-node
     type: regex-version
     files: ["package.json"]
-    pattern: '^\s*"node"\s*:\s*"[^"\d]*(?P<version>\d[\d.]*)'
+    # exact versions and ^/~ ranges only: a ">=" floor (">=18.0" in generated SDK manifests)
+    # admits every fixed release and is not reported
+    pattern: '^\s*"node"\s*:\s*"\s*[\^~=v]?\s*(?P<version>\d[\d.]*)'
     table: node
     line_parts: 1
     pin_parts: 3
@@ -295,7 +297,7 @@ detectors:
     packages: {certifi: certifi}
     severity: {vulnerable: high}
     fix:
-      vulnerable: {kind: tool, command: "uvx uv@0.13.4 lock --upgrade-package certifi || poetry update certifi || pdm update certifi"}
+      vulnerable: {kind: tool, command: "uvx uv@0.13.4 lock --upgrade-package certifi || poetry update --lock certifi || pdm update certifi"}
 
   - id: pipfile-lock-certifi
     type: pair
@@ -350,7 +352,7 @@ detectors:
     packages: {grpcio: grpcio}
     severity: {vulnerable: high}
     fix:
-      vulnerable: {kind: tool, command: "uvx uv@0.13.4 lock --upgrade-package grpcio || poetry update grpcio || pdm update grpcio"}
+      vulnerable: {kind: tool, command: "uvx uv@0.13.4 lock --upgrade-package grpcio || poetry update --lock grpcio || pdm update grpcio"}
     note: "grpcio ships its own roots.pem and ignores certifi; Google Cloud clients (BigQuery, Pub/Sub, Firestore, Spanner) talk gRPC through it. 1.84.1 (grpc/grpc#43700) removes both roots. Regenerate with uv 0.13.x so a revision-5 lock is not rewritten."
 
   - id: grpcio-pipfile-lock
