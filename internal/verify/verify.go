@@ -160,6 +160,14 @@ func Run(p *pack.Pack, url string, opt Options) Result {
 			for i, df := range dockerfiles {
 				tag := fmt.Sprintf("fumigator-verify:%s-%d", res.Number, i)
 				st := build(opt.Repo, df, tag, opt.BuildTimeout)
+				if st.Ran && !st.Passed {
+					// one retry: large downloads (CUDA wheels, base layers) fail transiently, and a
+					// flake must not read as a broken Dockerfile
+					if again := build(opt.Repo, df, tag, opt.BuildTimeout); again.Passed {
+						again.Detail += " (passed on retry; the first attempt failed: " + strings.TrimPrefix(st.Detail, "build failed: ")[:min(160, len(strings.TrimPrefix(st.Detail, "build failed: ")))] + ")"
+						st = again
+					}
+				}
 				if st.Ran && !st.Passed && view.BaseRefName != "" {
 					// does the same Dockerfile build on the base branch? separates "this PR broke
 					// it" from "it was already broken"
