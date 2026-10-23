@@ -107,6 +107,10 @@ func Sync(repos []Repo, dest string, workers int, depth int, progress func(SyncR
 
 func syncOne(r Repo, dest string, depth int) SyncResult {
 	dir := filepath.Join(dest, r.Name)
+	if r.DefaultBranch.Name == "" {
+		// an empty repository has no default branch and nothing to scan
+		return SyncResult{r.Name, "skipped", fmt.Errorf("empty repository")}
+	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		// existing clone: refuse to touch a dirty tree, otherwise fetch + reset to origin default
 		if out, _ := exec.Command("git", "-C", dir, "status", "--porcelain").Output(); len(bytes.TrimSpace(out)) > 0 {

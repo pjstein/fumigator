@@ -77,9 +77,13 @@ Rules: dry run unless `--apply`; refuses a repo with modified tracked files; wor
 `sec/<pack-id>`, starting from the remote copy when one exists (so commits a reviewer pushed
 are kept) and from the current default branch when the earlier PR has merged; refuses a
 local branch that has diverged; never force-pushes; returns the clone to the branch it was
-on; appends later edits to an open PR's body as "Additional changes"; never hand-edits a lockfile (lockfile
-fixes are tool commands that run with `--run-tools`, and a tool that is missing or fails
-becomes a checklist item); stages tracked files plus known lockfiles only. Commits and PR
+on; appends later edits to an open PR's body as "Additional changes"; never hand-edits a lockfile. Lockfile fixes are tool commands that run with `--run-tools`,
+using the program that owns that lockfile (uv for `uv.lock`, Poetry for `poetry.lock`, ...)
+and, for `uv.lock`, the newest uv release that keeps the lock's existing revision, so CI on
+an older uv can still read it. A tool that is missing or fails becomes a checklist item, and
+any manifest pin raised for that package is rolled back so manifest and lock agree. Pins in
+hash-pinned requirements files are never rewritten; they must be re-exported. Stages tracked
+files plus lockfiles the repository already tracks, never new ones. Commits and PR
 titles start `fix(security):`. The PR body is the same everywhere: why, the advisory, a
 table of every edit, lockfiles regenerated, a checklist of what a person must decide, and
 how to verify. A repo whose findings are all decisions gets the body written to

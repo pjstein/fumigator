@@ -257,6 +257,12 @@ func (r *remediator) rewrite(f findings.Finding) {
 		return
 	}
 	old := r.files[f.File][i]
+	if hashPinned(r.files[f.File], i) {
+		f.Note = "the requirements file is hash-pinned (--hash lines); regenerate it with the tool that wrote it (uv export, pip-compile --generate-hashes, poetry export) instead of editing the pin. " + f.Note
+		f.Fix = "manual"
+		r.res.Manual = append(r.res.Manual, f)
+		return
+	}
 	var after string
 	if f.FixPattern != "" {
 		after = regexp.MustCompile(f.FixPattern).ReplaceAllString(old, f.FixText)
@@ -285,6 +291,20 @@ func (r *remediator) rewrite(f findings.Finding) {
 	r.dirty[f.File] = true
 	r.res.Edits = append(r.res.Edits, Edit{f.File, i + 1, old, after, why(f)})
 	r.refreshComment(f.File, i, f.Replace, f.FixText)
+}
+
+// hashPinned reports a requirement line that carries --hash options (on the line or on its
+// backslash continuations): pip --require-hashes needs an exact == pin there.
+func hashPinned(lines []string, i int) bool {
+	for j := i; j < len(lines) && j < i+40; j++ {
+		if strings.Contains(lines[j], "--hash=") {
+			return true
+		}
+		if !strings.HasSuffix(strings.TrimSpace(lines[j]), "\\") {
+			return false
+		}
+	}
+	return false
 }
 
 // digestRef matches "name:tag@sha256:..." in a FROM or image: line.
@@ -379,12 +399,18 @@ func (r *remediator) flush() {
 func (r *remediator) runTools(tools []findings.Finding) {
 	seen := map[string]bool{}
 	for _, f := range tools {
-		cmd := f.FixText
-		if cmd == "" {
+		if f.FixText == "" {
 			r.res.Manual = append(r.res.Manual, f)
 			continue
 		}
-		dir := filepath.Join(r.repo, filepath.Dir(f.File))
+		cmd := commandFor(f.FixText, f.File)
+		if cmd == "" {
+			f.Note = fmt.Sprintf("no command in the pack owns %s (%s); update it with that project's own tool. %s", filepath.Base(f.File), f.FixText, f.Note)
+			r.res.Manual = append(r.res.Manual, f)
+			continue
+		}
+		rel := filepath.Dir(f.File)
+		dir := filepath.Join(r.repo, rel)
 		key := dir + "\x00" + cmd
 		if seen[key] {
 			continue
@@ -403,22 +429,40 @@ func (r *remediator) runTools(tools []findings.Finding) {
 		if !anyToolOnPath(cmd) {
 			f.Note = "tool not installed here; run: `" + cmd + "`. " + f.Note
 			r.res.Manual = append(r.res.Manual, f)
+			r.undoPinsFor(rel, f)
 			continue
 		}
-		c := exec.Command("sh", "-c", cmd)
-		c.Dir = dir
-		var out bytes.Buffer
-		c.Stdout, c.Stderr = &out, &out
-		if err := c.Run(); err != nil {
-			tail := strings.Join(strings.Fields(out.String()), " ")
-			if len(tail) > 300 {
-				tail = tail[len(tail)-300:]
+		var runErr error
+		if filepath.Base(f.File) == "uv.lock" {
+			var ran string
+			_, ran, runErr = runUVKeepingRevision(dir, cmd)
+			if runErr == nil {
+				tr.Command = ran
 			}
-			f.Note = fmt.Sprintf("`%s` failed: %s. %s", cmd, tail, f.Note)
+		} else {
+			c := exec.Command("sh", "-c", cmd)
+			c.Dir = dir
+			var out bytes.Buffer
+			c.Stdout, c.Stderr = &out, &out
+			if err := c.Run(); err != nil {
+				runErr = fmt.Errorf("%s", tailOf(out.String()))
+			}
+		}
+		if runErr != nil {
+			f.Note = fmt.Sprintf("`%s` failed: %v. %s", cmd, runErr, f.Note)
 			r.res.Manual = append(r.res.Manual, f)
+			r.undoPinsFor(rel, f)
 			continue
 		}
 		r.res.Tools = append(r.res.Tools, tr)
+	}
+}
+
+// undoPinsFor rolls back manifest pins for the finding's package in rel, and says so.
+func (r *remediator) undoPinsFor(rel string, f findings.Finding) {
+	pkg := packageOf(f.Current)
+	for _, e := range r.rollbackPins(rel, pkg) {
+		r.res.Skipped = append(r.res.Skipped, fmt.Sprintf("%s:%d reverted the %s pin: the lock in %s could not be regenerated, so the manifest is left matching the lock", e.File, e.Line, pkg, rel))
 	}
 }
 
@@ -457,7 +501,11 @@ func (r *remediator) commitAndPR(name string) {
 		}
 		if lockfiles[info.Name()] {
 			rel, _ := filepath.Rel(repo, p)
-			git(repo, "add", "--", rel)
+			// only lockfiles the repository already tracks: a tool that writes a new lockfile
+			// beside a different one (uv in a Poetry project) must not slip it into the PR
+			if gitErr(repo, "ls-files", "--error-unmatch", "--", rel) == nil {
+				git(repo, "add", "--", rel)
+			}
 		}
 		return nil
 	})
