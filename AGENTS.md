@@ -50,6 +50,9 @@ reporting.
   carry the generated body. If a repository's CI gate rejects that shape (a PR template, a
   commit convention), adapt that one PR by hand and say so; do not change the standard for
   everyone.
+- A trust store can hide anywhere a library ships its own roots (grpcio's `roots.pem`
+  ignores certifi). `pr verify` probes every bundle file inside each built image; treat a
+  STILL TRUSTS there as the real verdict, whatever the scan said.
 - A CI failure on a remediation PR is yours only if the diff caused it. Check the same
   workflow on the default branch before concluding.
 - Report what you did not run or could not verify, plainly.

@@ -29,6 +29,8 @@ versions:
   rustup: {"*": "1.29.2"}
   mise: {"*": "2026.10.17"}
   claude: {"*": "2.1.303"}
+  grpcio: {"*": "1.84.1"}
+  x509roots-fallback: {"*": "20261019000000"}
 eol:
   node: ["14", "16", "18", "19", "20", "21", "23", "25"]
   go: ["1.20", "1.21", "1.22", "1.23", "1.24", "1.25"]
@@ -269,7 +271,7 @@ detectors:
     packages: {certifi: certifi}
     severity: {vulnerable: high}
     fix:
-      vulnerable: {kind: tool, command: "uv lock --upgrade-package certifi || poetry update certifi || pdm update certifi"}
+      vulnerable: {kind: tool, command: "uvx uv@0.13.4 lock --upgrade-package certifi || poetry update certifi || pdm update certifi"}
 
   - id: pipfile-lock-certifi
     type: pair
@@ -314,6 +316,69 @@ detectors:
       vulnerable: {kind: tool, command: "mix deps.update {name}"}
       unknown: {kind: manual}
     note: "erlang-certifi has no fix yet; prefer castore or :public_key.cacerts_get()."
+
+  # ---- libraries that ship their own root store (ignore certifi and the OS) ----
+  - id: grpcio-lock
+    type: pair
+    files: ["uv.lock", "poetry.lock", "pdm.lock"]
+    name_pattern: '^\s*name\s*=\s*"(?P<name>grpcio)"\s*$'
+    version_pattern: '^\s*version\s*=\s*"(?P<version>[\d.]+)"'
+    packages: {grpcio: grpcio}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: tool, command: "uvx uv@0.13.4 lock --upgrade-package grpcio || poetry update grpcio || pdm update grpcio"}
+    note: "grpcio ships its own roots.pem and ignores certifi; Google Cloud clients (BigQuery, Pub/Sub, Firestore, Spanner) talk gRPC through it. 1.84.1 (grpc/grpc#43700) removes both roots. Regenerate with uv 0.13.x so a revision-5 lock is not rewritten."
+
+  - id: grpcio-pipfile-lock
+    type: pair
+    files: ["Pipfile.lock"]
+    name_pattern: '^\s*"(?P<name>grpcio)"\s*:\s*\{'
+    version_pattern: '^\s*"version"\s*:\s*"==(?P<version>[\d.]+)"'
+    packages: {grpcio: grpcio}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: tool, command: "pipenv update grpcio"}
+
+  - id: grpcio-pin
+    type: regex-version
+    files: ["requirements*.txt", "constraints*.txt", "pyproject.toml", "setup.py", "setup.cfg"]
+    pattern: '^\s*["'']?grpcio["'']?\s*(?:==|>=|~=|=)\s*["'']?(?P<version>\d+\.\d+(?:\.\d+)?)'
+    table: grpcio
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: rewrite, pattern: '(grpcio["'']?\s*)(?:==|>=|~=|=)(\s*["'']?)[\d.]+', to: '${1}>=${2}{fixed}'}
+    note: "grpcio ships its own roots.pem and ignores certifi; 1.84.1 removes the compromised roots."
+
+  - id: uv-image-tag
+    type: regex-version
+    files: *imagefiles
+    pattern: '(?:FROM\s+|COPY\s+--from=|image:\s*["'']?)(?:ghcr\.io/)?astral-sh/uv:(?P<version>\d[\w.+-]*)'
+    table: uv
+    severity: {vulnerable: medium}
+    fix:
+      vulnerable: {kind: rewrite, capture: numeric, to: "{fixed}"}
+    note: "uv is a Rust binary with webpki roots compiled in; it fetches every package the image installs."
+
+  - id: go-x509roots-fallback
+    type: regex-version
+    files: ["go.mod"]
+    pattern: 'golang\.org/x/crypto/x509roots/fallback\s+v0\.0\.0-(?P<version>\d{14})-'
+    table: x509roots-fallback
+    pin_parts: 1
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: tool, command: "go get golang.org/x/crypto/x509roots/fallback@latest && go mod tidy"}
+    note: "x509roots/fallback compiles a root bundle into the binary and is the only trust store in scratch or distroless images; a snapshot older than 2026-10-19 trusts the chain."
+
+  - id: gcloud-image-bundles
+    type: absent
+    files: ["Dockerfile", "Dockerfile.*", "*.dockerfile", "Containerfile"]
+    trigger: '(?i)^\s*FROM\s+(?:--platform=\S+\s+)?\S*(?:google/cloud-sdk|cloudsdktool/(?:google-)?cloud-(?:sdk|cli))\S*(?:\s+AS\s+\S+)?\s*$'
+    require: 'custom_ca_certs_file'
+    severity: {absent: medium}
+    fix:
+      absent: {kind: insert-after, to: "RUN gcloud config set core/custom_ca_certs_file /etc/ssl/certs/ca-certificates.crt"}
+    note: "The Cloud SDK image carries its own certifi, botocore and httplib2 bundles, which `gcloud components update` does not refresh; pointing gcloud at the image's system bundle makes gcloud, gsutil and bq use the patched store."
 
   # ---- vendored trust stores ----
   - id: vendored-ca-bundle
@@ -595,6 +660,23 @@ host:
     fix:
       vulnerable: {command: "pipx runpip {name} install -q -U certifi"}
     note: "pipx upgrade only upgrades the app, not its dependencies; runpip reaches the venv's pip."
+
+  - id: grpcio-installed
+    table: python_installs
+    where: {kind: "re:^(pyenv|venv|pythonorg|conda|brew)$", grpcio: "re:."}
+    version: {column: grpcio, table: grpcio}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "'{path}' -m pip install -q -U 'grpcio>=1.84.1'"}
+    note: "grpcio ships its own roots.pem and ignores certifi."
+
+  - id: grpcio-tool-env
+    table: python_installs
+    where: {kind: "re:^(uv-tool|pipx)$", grpcio: "re:."}
+    version: {column: grpcio, table: grpcio}
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {command: "uv tool install --reinstall --with 'grpcio>=1.84.1' {name} 2>/dev/null || pipx runpip {name} install -q -U 'grpcio>=1.84.1'"}
 
   - id: go-toolchain
     table: tools

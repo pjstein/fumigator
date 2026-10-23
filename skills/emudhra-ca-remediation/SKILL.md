@@ -20,6 +20,11 @@ Read `findings/emudhra-ca-2026-10/summary.md`. Severity is about exposure, not e
 `high` is a runtime or image that trusts it until rebuilt; `medium` is probably fine after a
 rebuild but not provable from the file; `low` is hygiene.
 
+Look beyond certifi: grpcio carries its own `roots.pem` and Google Cloud clients (BigQuery,
+Pub/Sub, Firestore) use it; Rust binaries and Go's `x509roots/fallback` compile roots in;
+the Cloud SDK bundles its own copies. The pack has rules for each; `fumigator pr verify`
+probes every bundle inside each built image and is the final word.
+
 States: `vulnerable` = pinned below the fixed release (rewrite); `floating` = unpinned tag or
 minor, a cached layer can satisfy it with an old build (rewrite to pin); `eol` = a line with
 no fixed release (manual: Node ≤ 21/23/25, Go < 1.26, Electron < 42); `absent` = a distro or

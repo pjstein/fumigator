@@ -74,7 +74,10 @@ fumigator fix --pack emudhra-ca-2026-10 --findings findings --apply --run-tools 
 ```
 
 Rules: dry run unless `--apply`; refuses a repo with modified tracked files; works on branch
-`sec/<pack-id>` and reuses it; never force-pushes; never hand-edits a lockfile (lockfile
+`sec/<pack-id>`, starting from the remote copy when one exists (so commits a reviewer pushed
+are kept) and from the current default branch when the earlier PR has merged; refuses a
+local branch that has diverged; never force-pushes; returns the clone to the branch it was
+on; appends later edits to an open PR's body as "Additional changes"; never hand-edits a lockfile (lockfile
 fixes are tool commands that run with `--run-tools`, and a tool that is missing or fails
 becomes a checklist item); stages tracked files plus known lockfiles only. Commits and PR
 titles start `fix(security):`. The PR body is the same everywhere: why, the advisory, a
@@ -87,12 +90,36 @@ fumigator pr verify --pack emudhra-ca-2026-10 --findings findings --ready   # ru
 fumigator pr ready  --pack emudhra-ca-2026-10 --findings findings [--no-checks]   # un-draft PRs whose checks all pass
 ```
 
-`pr verify` works through the PR's own "Verify before merging" list: CI state, a
-`docker build --pull --no-cache` of every Dockerfile the PR touched, and the advisory's test
-hosts fetched from inside each built image (the image must fail). It ticks what passed and
-appends a dated "Verification run" section with each result; a failed build is also tried on
-the base branch so the body says whether the PR broke it or it was already broken. Re-runs
-replace the section.
+`pr verify` works through the PR's own "Verify before merging" list: CI state, then a
+`docker build --pull --no-cache` of every image the PR affects, meaning every Dockerfile it
+touched plus every Dockerfile whose `COPY`/`ADD` inputs include a file it changed (a
+lockfile bump changes the image even when the Dockerfile does not). Inside each built image
+it fetches the advisory's test hosts with every TLS client present (curl or wget, Python's
+default context, certifi, Node, Java), then with every CA bundle file on disk as an explicit
+trust store: certifi, gRPC's `roots.pem`, httplib2, botocore, the system bundle. The image
+passes only if all of them refuse. pip's private vendored certifi is reported but not
+counted, since only pip reads it. It ticks what passed and appends a dated
+"Verification run" section; a failed build is retried from the repository root (the usual
+context for monorepos) and on the base branch, so the body says whether the PR broke it.
+Re-runs replace the section.
+
+## What gets checked
+
+Trust stores live in more places than the OS bundle. The eMudhra pack covers each place
+found so far:
+
+| Where the roots live | Examples | Rule |
+|---|---|---|
+| OS bundle | `ca-certificates` in a base image, `/etc/ssl/cert.pem` on a Mac | base-image upgrade, host bundle checks |
+| Language runtime | Node, Go, Deno, Bun, Java keystores, Electron apps | version pins, image tags, host checks |
+| Python package | certifi, **grpcio** (`roots.pem`, ignores certifi), pip's vendored certifi | lockfile and requirements rules, host checks |
+| Compiled into a binary | Rust `webpki-roots`, Go `x509roots/fallback`, uv, any CLI built with rustls | lockfile rules, image tags, host binary scan |
+| Bundled by an SDK or app | gcloud (certifi, botocore, httplib2 copies), AWS CLI, conda envs, `.app` bundles | host bundle scan, gcloud image rule |
+| Vendored into a repo | a `cacert.pem` checked in | content rule |
+
+httplib2 and botocore fall back to their own bundles only when certifi is not installed. The
+org scan found neither without certifi, so there is no separate rule yet; the in-image probe
+would catch it.
 
 ## Packs
 

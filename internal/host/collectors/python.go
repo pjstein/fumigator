@@ -21,16 +21,16 @@ type pythonInstalls struct{}
 
 func (pythonInstalls) Name() string { return "python_installs" }
 func (pythonInstalls) Columns() []string {
-	return []string{"kind", "name", "path", "version", "ssl", "certifi", "pip"}
+	return []string{"kind", "name", "path", "version", "ssl", "certifi", "pip", "grpcio"}
 }
 func (pythonInstalls) Doc() string {
-	return "Python interpreters (pyenv, Homebrew, python.org, uv, Apple, conda base and envs) and virtualenvs (project venvs, uv tool envs, pipx venvs) with their certifi and pip versions"
+	return "Python interpreters (pyenv, Homebrew, python.org, uv, Apple, conda base and envs) and virtualenvs (project venvs, uv tool envs, pipx venvs) with their certifi, pip and grpcio versions"
 }
 func (pythonInstalls) Platforms() []string { return nil }
 func (pythonInstalls) Slow() bool          { return true }
 
 func pyInfo(kind, name, py string) table.Row {
-	row := table.Row{"kind": kind, "name": name, "path": py, "version": "", "ssl": "false", "certifi": "", "pip": ""}
+	row := table.Row{"kind": kind, "name": name, "path": py, "version": "", "ssl": "false", "certifi": "", "pip": "", "grpcio": ""}
 	if out, ok := table.Sh(py, "-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"); ok {
 		row["version"] = out
 	}
@@ -42,6 +42,10 @@ func pyInfo(kind, name, py string) table.Row {
 	}
 	if out, ok := table.Sh(py, "-m", "pip", "--version"); ok {
 		row["pip"] = table.FirstVersion(out)
+	}
+	// grpcio ships its own roots.pem; read the version without importing grpc (slow, native)
+	if out, ok := table.Sh(py, "-c", "import importlib.metadata as m; print(m.version('grpcio'))"); ok {
+		row["grpcio"] = table.FirstVersion(out)
 	}
 	return row
 }

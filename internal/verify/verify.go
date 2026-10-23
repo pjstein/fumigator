@@ -120,23 +120,39 @@ func Run(p *pack.Pack, url string, opt Options) Result {
 		return res
 	}
 
-	// Dockerfiles the PR touched
+	// Images to build: every Dockerfile the PR touched, plus every Dockerfile whose COPY/ADD
+	// inputs include a file the PR changed (a lockfile bump changes the image even when the
+	// Dockerfile does not).
 	out, _ = exec.Command("gh", "pr", "diff", res.Number, "--repo", res.Repo, "--name-only").Output()
-	var dockerfiles []string
+	var changed []string
 	for f := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		base := strings.ToLower(filepath.Base(f))
-		if f != "" && (strings.HasPrefix(base, "dockerfile") || strings.HasSuffix(base, ".dockerfile") || base == "containerfile") {
-			dockerfiles = append(dockerfiles, f)
+		if f != "" {
+			changed = append(changed, f)
+		}
+	}
+	if opt.Repo != "" {
+		if orig := strings.TrimSpace(gitOut(opt.Repo, "branch", "--show-current")); orig != "" {
+			defer func() { _ = exec.Command("git", "-C", opt.Repo, "checkout", "-q", orig).Run() }()
+		}
+	}
+	var dockerfiles []string
+	checkoutErr := fmt.Errorf("docker not installed here")
+	if _, err := exec.LookPath("docker"); err == nil {
+		checkoutErr = checkout(opt.Repo, opt.Branch)
+	}
+	if checkoutErr == nil {
+		dockerfiles = affectedDockerfiles(opt.Repo, changed)
+	} else {
+		for _, f := range changed {
+			if isDockerfile(f) {
+				dockerfiles = append(dockerfiles, f)
+			}
 		}
 	}
 	if len(dockerfiles) > 0 {
-		if _, err := exec.LookPath("docker"); err != nil {
+		if checkoutErr != nil {
 			for _, df := range dockerfiles {
-				res.Steps = append(res.Steps, Step{Item: buildItem(df), Detail: "docker not installed here", Ran: false})
-			}
-		} else if err := checkout(opt.Repo, opt.Branch); err != nil {
-			for _, df := range dockerfiles {
-				res.Steps = append(res.Steps, Step{Item: buildItem(df), Detail: "checkout: " + err.Error(), Ran: false})
+				res.Steps = append(res.Steps, Step{Item: buildItem(df), Detail: checkoutErr.Error(), Ran: false})
 			}
 		} else {
 			urls := probeURLs(p)
@@ -159,9 +175,7 @@ func Run(p *pack.Pack, url string, opt Options) Result {
 				}
 				res.Steps = append(res.Steps, st)
 				if st.Ran && st.Passed {
-					for _, u := range urls {
-						res.Steps = append(res.Steps, probe(tag, df, u))
-					}
+					res.Steps = append(res.Steps, probeImage(tag, df, urls)...)
 					_ = exec.Command("docker", "rmi", "-f", tag).Run()
 				}
 			}
@@ -185,6 +199,81 @@ func Run(p *pack.Pack, url string, opt Options) Result {
 		_ = exec.Command("gh", "pr", "ready", res.Number, "--repo", res.Repo).Run()
 	}
 	return res
+}
+
+func isDockerfile(f string) bool {
+	base := strings.ToLower(filepath.Base(f))
+	return strings.HasPrefix(base, "dockerfile") || strings.HasSuffix(base, ".dockerfile") || base == "containerfile"
+}
+
+func gitOut(repo string, args ...string) string {
+	out, _ := exec.Command("git", append([]string{"-C", repo}, args...)...).Output()
+	return string(out)
+}
+
+var copyLine = regexp.MustCompile(`(?im)^\s*(?:COPY|ADD)\s+(.*)$`)
+
+// affectedDockerfiles returns the Dockerfiles that the change set touches directly or through
+// a COPY/ADD source. Sources are resolved against both plausible build contexts (the
+// Dockerfile's directory and the repository root), since nothing in the file says which.
+func affectedDockerfiles(repo string, changed []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(df string) {
+		if !seen[df] {
+			seen[df] = true
+			out = append(out, df)
+		}
+	}
+	for _, f := range changed {
+		if isDockerfile(f) {
+			add(f)
+		}
+	}
+	for f := range strings.SplitSeq(strings.TrimSpace(gitOut(repo, "ls-files")), "\n") {
+		if f == "" || !isDockerfile(f) || seen[f] {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(repo, f))
+		if err != nil {
+			continue
+		}
+		for _, m := range copyLine.FindAllStringSubmatch(string(b), -1) {
+			args := strings.Fields(m[1])
+			var srcs []string
+			from := false
+			for _, a := range args {
+				if strings.HasPrefix(a, "--from=") {
+					from = true
+				}
+				if !strings.HasPrefix(a, "--") {
+					srcs = append(srcs, strings.Trim(a, `"[],`))
+				}
+			}
+			if from || len(srcs) < 2 {
+				continue
+			}
+			for _, src := range srcs[:len(srcs)-1] {
+				for _, ctx := range []string{filepath.Dir(f), "."} {
+					p := filepath.Clean(filepath.Join(ctx, src))
+					for _, c := range changed {
+						if p == "." || c == p || strings.HasPrefix(c, p+"/") || matchGlob(p, c) {
+							add(f)
+						}
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+func matchGlob(pattern, name string) bool {
+	if !strings.ContainsAny(pattern, "*?[") {
+		return false
+	}
+	ok, _ := filepath.Match(pattern, name)
+	return ok
 }
 
 func buildItem(df string) string {
@@ -263,43 +352,118 @@ func buildIn(repo, df, tag, contextDir string, timeout time.Duration) (Step, str
 	return st, out.String()
 }
 
-// probe runs the first available TLS client inside the image against url. The image must
-// fail to fetch it; a fetch that succeeds means the image still trusts the chain.
-func probe(tag, df, url string) Step {
-	item := fmt.Sprintf("the built image rejects %s (a certificate error is the good outcome)", url)
-	script := `if command -v curl >/dev/null 2>&1; then c=curl; curl -sSf --max-time 15 -o /dev/null "$1" && echo FETCHED || echo REJECTED;
-elif command -v wget >/dev/null 2>&1; then c=wget; wget -q --timeout=15 -O /dev/null "$1" && echo FETCHED || echo REJECTED;
-elif command -v python3 >/dev/null 2>&1; then c=python3; python3 -c "import urllib.request,sys; urllib.request.urlopen(sys.argv[1],timeout=15)" "$1" 2>/dev/null && echo FETCHED || echo REJECTED;
-elif command -v node >/dev/null 2>&1; then c=node; node -e "fetch(process.argv[1]).then(()=>console.log('FETCHED'),()=>console.log('REJECTED'))" "$1";
-else echo NOCLIENT; fi; echo "client=$c"`
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	c := exec.CommandContext(ctx, "docker", "run", "--rm", "--entrypoint", "sh", tag, "-c", script, "sh", url)
-	out, err := c.CombinedOutput()
-	s := string(out)
-	st := Step{Item: item}
-	switch {
-	case strings.Contains(s, "REJECTED"):
-		st.Ran, st.Passed, st.Detail = true, true, "rejected, "+clientOf(s)+" in "+df
-	case strings.Contains(s, "FETCHED"):
-		st.Ran, st.Passed, st.Detail = true, false, "STILL TRUSTS: fetched the test page, "+clientOf(s)+" in "+df
-	case strings.Contains(s, "NOCLIENT"):
-		st.Detail = "no curl/wget/python3/node in the image built from " + df + "; not probed"
-	default:
-		d := strings.Join(strings.Fields(lastLines(s, 3)), " ")
-		if err != nil && d == "" {
-			d = err.Error()
-		}
-		st.Detail = "could not probe the image from " + df + " (no shell?): " + d
-	}
-	return st
+// probeScript runs inside the built image. For each test URL it tries every TLS client the
+// image has (system curl/wget, Python's default context, certifi, Node, Java), then every CA
+// bundle file on disk (certifi, pip's vendored copy, grpc's roots.pem, httplib2, botocore,
+// the system bundle) as an explicit trust store. One line per check:
+//
+//	CHECK <kind> <label> <url> FETCHED|REJECTED
+const probeScript = `
+ok_fetch() { echo "CHECK $1 $2 $3 FETCHED"; }
+ok_reject() { echo "CHECK $1 $2 $3 REJECTED"; }
+for u in "$@"; do
+  if command -v curl >/dev/null 2>&1; then curl -sSf --max-time 15 -o /dev/null "$u" 2>/dev/null && ok_fetch client curl "$u" || ok_reject client curl "$u";
+  elif command -v wget >/dev/null 2>&1; then wget -q -T 15 -O /dev/null "$u" 2>/dev/null && ok_fetch client wget "$u" || ok_reject client wget "$u"; fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import sys,urllib.request; urllib.request.urlopen(sys.argv[1],timeout=15)" "$u" 2>/dev/null && ok_fetch client python3-ssl "$u" || ok_reject client python3-ssl "$u"
+    if python3 -c "import certifi" 2>/dev/null; then
+      python3 -c "import sys,ssl,certifi,urllib.request; urllib.request.urlopen(sys.argv[1],timeout=15,context=ssl.create_default_context(cafile=certifi.where()))" "$u" 2>/dev/null && ok_fetch client python3-certifi "$u" || ok_reject client python3-certifi "$u"
+    fi
+  fi
+  if command -v node >/dev/null 2>&1; then
+    node -e "fetch(process.argv[1]).then(()=>process.exit(0),()=>process.exit(1))" "$u" 2>/dev/null && ok_fetch client node "$u" || ok_reject client node "$u"
+  fi
+  if command -v java >/dev/null 2>&1; then
+    d=$(mktemp -d 2>/dev/null || echo /tmp/fv$$); mkdir -p "$d"
+    printf 'public class T{public static void main(String[] a)throws Exception{new java.net.URL(a[0]).openStream().close();}}' > "$d/T.java"
+    (cd "$d" && java T.java "$u" >/dev/null 2>&1) && ok_fetch client java "$u" || ok_reject client java "$u"
+  fi
+done
+seen=""
+for f in $(find / -xdev -type f \( -name cacert.pem -o -name roots.pem -o -name cacerts.txt -o -name ca-bundle.crt -o -name ca-certificates.crt -o -name tls-ca-bundle.pem -o -name cert.pem \) -size -4096k 2>/dev/null | grep -vE '/(tests?|testdata|fixtures|dummyserver)/' | head -60); do
+  h=$(cksum "$f" 2>/dev/null | cut -d' ' -f1-2); case " $seen " in *" $h "*) continue;; esac; seen="$seen $h"
+  grep -q 'BEGIN CERTIFICATE' "$f" 2>/dev/null || continue
+  for u in "$@"; do
+    if command -v curl >/dev/null 2>&1; then curl -sSf --max-time 15 --cacert "$f" -o /dev/null "$u" 2>/dev/null && ok_fetch bundle "$f" "$u" || ok_reject bundle "$f" "$u";
+    elif command -v python3 >/dev/null 2>&1; then python3 -c "import sys,ssl,urllib.request; urllib.request.urlopen(sys.argv[1],timeout=15,context=ssl.create_default_context(cafile=sys.argv[2]))" "$u" "$f" 2>/dev/null && ok_fetch bundle "$f" "$u" || ok_reject bundle "$f" "$u";
+    elif command -v wget >/dev/null 2>&1; then wget -q -T 15 --ca-certificate="$f" -O /dev/null "$u" 2>/dev/null && ok_fetch bundle "$f" "$u" || ok_reject bundle "$f" "$u";
+    elif grep -q -e 'emSign ECC Root CA - G3' -e 'AAA Certificate Services' "$f"; then ok_fetch bundle "$f" "$u";
+    else ok_reject bundle "$f" "$u"; fi
+  done
+done
+echo DONE
+`
+
+// pipVendored reports bundles that only pip itself reads (pip's private certifi copy): shown in
+// the detail, not counted against the image, because nothing but pip installs uses them.
+func pipVendored(path string) bool {
+	return strings.Contains(path, "/pip/_vendor/")
 }
 
-func clientOf(s string) string {
-	if i := strings.LastIndex(s, "client="); i >= 0 {
-		return "via " + strings.TrimSpace(s[i+7:])
+// probeImage runs probeScript in the image and turns its lines into one checklist step per URL.
+// A URL passes when every client and every bundle (other than pip's private copy) rejects it.
+func probeImage(tag, df string, urls []string) []Step {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	args := append([]string{"run", "--rm", "--user", "0", "--entrypoint", "sh", tag, "-c", probeScript, "sh"}, urls...)
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	type res struct {
+		checked             int
+		fetched, pipFetched []string
 	}
-	return ""
+	per := map[string]*res{}
+	for _, u := range urls {
+		per[u] = &res{}
+	}
+	done := false
+	for l := range strings.SplitSeq(string(out), "\n") {
+		f := strings.Fields(l)
+		if len(f) == 1 && f[0] == "DONE" {
+			done = true
+		}
+		if len(f) != 5 || f[0] != "CHECK" {
+			continue
+		}
+		r := per[f[3]]
+		if r == nil {
+			continue
+		}
+		r.checked++
+		if f[4] == "FETCHED" {
+			label := f[2]
+			if f[1] == "bundle" && pipVendored(f[2]) {
+				r.pipFetched = append(r.pipFetched, label)
+			} else {
+				r.fetched = append(r.fetched, f[1]+" "+label)
+			}
+		}
+	}
+	var steps []Step
+	for _, u := range urls {
+		r := per[u]
+		st := Step{Item: fmt.Sprintf("the built image rejects %s (a certificate error is the good outcome)", u)}
+		switch {
+		case !done && r.checked == 0:
+			d := strings.Join(strings.Fields(lastLines(string(out), 3)), " ")
+			if err != nil && d == "" {
+				d = err.Error()
+			}
+			st.Detail = "could not probe the image from " + df + " (no shell?): " + d
+		case r.checked == 0:
+			st.Detail = "no TLS client or CA bundle in the image built from " + df + "; not probed"
+		case len(r.fetched) > 0:
+			st.Ran = true
+			st.Detail = "STILL TRUSTS in " + df + ": " + strings.Join(r.fetched, "; ")
+		default:
+			st.Ran, st.Passed = true, true
+			st.Detail = fmt.Sprintf("rejected by all %d client and bundle checks in %s", r.checked-len(r.pipFetched), df)
+		}
+		if len(r.pipFetched) > 0 {
+			st.Detail += ". pip's own vendored copy still trusts it (" + strings.Join(r.pipFetched, ", ") + "); only pip installs read it, upgrade pip in the image"
+		}
+		steps = append(steps, st)
+	}
+	return steps
 }
 
 func lastLines(s string, n int) string {

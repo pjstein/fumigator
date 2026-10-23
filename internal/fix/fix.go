@@ -95,13 +95,19 @@ func Run(p *pack.Pack, rep *findings.RepoReport, opt Options) *Result {
 			opt.Base = strings.TrimSpace(git(rep.Repo, "rev-parse", "--abbrev-ref", "HEAD").String())
 			r.opt.Base = opt.Base
 		}
-		if err := gitErr(rep.Repo, "rev-parse", "--verify", "--quiet", opt.Branch); err == nil {
-			if err := gitErr(rep.Repo, "checkout", "-q", opt.Branch); err != nil {
-				r.res.Refused = "checkout " + opt.Branch + ": " + err.Error()
-				return r.res
-			}
-		} else if err := gitErr(rep.Repo, "checkout", "-q", "-b", opt.Branch); err != nil {
-			r.res.Refused = "create branch: " + err.Error()
+		// leave the clone on the branch it started on, so later scans read the default branch
+		// (only when everything was committed: uncommitted edits would follow the checkout)
+		if orig := strings.TrimSpace(git(rep.Repo, "branch", "--show-current").String()); orig != "" && orig != opt.Branch {
+			defer func() {
+				if strings.TrimSpace(git(rep.Repo, "status", "--porcelain", "--untracked-files=no").String()) == "" {
+					_ = gitErr(rep.Repo, "checkout", "-q", orig)
+				} else {
+					r.note("left on " + opt.Branch + " with uncommitted edits for review; commit them, or discard them (git checkout -- .) and run again with --apply --pr")
+				}
+			}()
+		}
+		if why := syncBranch(rep.Repo, opt.Branch, opt.Base); why != "" {
+			r.res.Refused = why
 			return r.res
 		}
 	}
@@ -152,6 +158,61 @@ func Run(p *pack.Pack, rep *findings.RepoReport, opt Options) *Result {
 		r.commitAndPR(filepath.Base(rep.Repo))
 	}
 	return r.res
+}
+
+// syncBranch puts the clone on branch, current with whatever is on the remote:
+//   - remote branch exists: start from it, fast-forwarding a local copy (a reviewer may have
+//     pushed commits); a local branch that has diverged is refused, never force-pushed;
+//   - remote branch gone and its PR merged: start fresh from the up-to-date base, so the
+//     follow-up PR carries only new changes;
+//   - neither: create the branch from the current base.
+//
+// It returns a refusal reason, or "".
+func syncBranch(repo, branch, base string) string {
+	remote := strings.TrimSpace(git(repo, "ls-remote", "--heads", "origin", branch).String())
+	local := gitErr(repo, "rev-parse", "--verify", "--quiet", branch) == nil
+	if remote != "" {
+		if err := gitErr(repo, "fetch", "-q", "origin", branch); err != nil {
+			return "fetch " + branch + ": " + err.Error()
+		}
+		if local && gitErr(repo, "merge-base", "--is-ancestor", "FETCH_HEAD", branch) == nil {
+			// local already contains the remote: keep it (it may hold commits not yet pushed)
+			if err := gitErr(repo, "checkout", "-q", branch); err != nil {
+				return "checkout " + branch + ": " + err.Error()
+			}
+			return ""
+		}
+		if local && gitErr(repo, "merge-base", "--is-ancestor", branch, "FETCH_HEAD") != nil {
+			return "local " + branch + " has diverged from origin; reconcile it by hand"
+		}
+		if err := gitErr(repo, "checkout", "-q", "-B", branch, "FETCH_HEAD"); err != nil {
+			return "checkout " + branch + ": " + err.Error()
+		}
+		return ""
+	}
+	if local {
+		cmd := exec.Command("gh", "pr", "list", "--head", branch, "--state", "merged", "--json", "number", "-q", ".[0].number")
+		cmd.Dir = repo
+		merged, _ := cmd.Output()
+		if strings.TrimSpace(string(merged)) == "" {
+			if err := gitErr(repo, "checkout", "-q", branch); err != nil {
+				return "checkout " + branch + ": " + err.Error()
+			}
+			return ""
+		}
+	}
+	start := base
+	if base != "" && gitErr(repo, "fetch", "-q", "origin", base) == nil {
+		start = "FETCH_HEAD"
+	}
+	args := []string{"checkout", "-q", "-B", branch}
+	if start != "" {
+		args = append(args, start)
+	}
+	if err := gitErr(repo, args...); err != nil {
+		return "create branch: " + err.Error()
+	}
+	return ""
 }
 
 func (r *remediator) lines(rel string) ([]string, bool) {
@@ -459,6 +520,9 @@ func (r *remediator) commitAndPR(name string) {
 		if strings.Contains(s, "already exists") {
 			r.note("PR already exists for this branch; pushed update")
 			if m := regexp.MustCompile(`https://\S+/pull/\d+`).FindString(s); m != "" {
+				r.appendToExistingBody(m)
+			}
+			if m := regexp.MustCompile(`https://\S+/pull/\d+`).FindString(s); m != "" {
 				r.res.PRURL = m
 			}
 			return
@@ -467,6 +531,46 @@ func (r *remediator) commitAndPR(name string) {
 		return
 	}
 	r.res.PRURL = s
+}
+
+// appendToExistingBody adds this run's edits and lockfile commands to an open PR's body, so
+// its table of changes stays complete when a later pack version adds rules.
+func (r *remediator) appendToExistingBody(url string) {
+	if len(r.res.Edits) == 0 && len(r.res.Tools) == 0 {
+		return
+	}
+	cur, err := exec.Command("gh", "pr", "view", url, "--json", "body", "-q", ".body").Output()
+	if err != nil {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n## Additional changes (%s)\n\n", time.Now().Format("2006-01-02"))
+	if len(r.res.Edits) > 0 {
+		b.WriteString("| File | Line | Before | After | Why |\n|---|---|---|---|---|\n")
+		for _, e := range r.res.Edits {
+			fmt.Fprintf(&b, "| `%s` | %d | `%s` | `%s` | %s |\n", e.File, e.Line, cell(e.Before), cell(e.After), e.Why)
+		}
+		b.WriteString("\n")
+	}
+	for _, t := range r.res.Tools {
+		fmt.Fprintf(&b, "- `%s`: `%s` (%s → %s)\n", t.Finding.File, t.Command, t.Finding.Current, t.Finding.Fixed)
+	}
+	body := string(cur)
+	if i := strings.Index(body, "\n## Verify before merging"); i >= 0 {
+		body = body[:i] + b.String() + body[i:]
+	} else {
+		body += b.String()
+	}
+	tmp, err := os.CreateTemp("", "fumigator-body-*.md")
+	if err != nil {
+		return
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	_, _ = tmp.WriteString(body)
+	_ = tmp.Close()
+	if exec.Command("gh", "pr", "edit", url, "--body-file", tmp.Name()).Run() == nil {
+		r.note("PR body extended with this run's changes")
+	}
 }
 
 // Body renders the PR body: why (from the pack), every edit, lockfiles, the human checklist,

@@ -168,6 +168,22 @@
   "Fixed": "2026.10.19"
  },
  {
+  "Detector": "grpcio-pin",
+  "File": "requirements.txt",
+  "Line": 3,
+  "State": "vulnerable",
+  "Current": "1.71.0",
+  "Fixed": "1.84.1"
+ },
+ {
+  "Detector": "go-x509roots-fallback",
+  "File": "tools/go.mod",
+  "Line": 5,
+  "State": "vulnerable",
+  "Current": "20260209214922",
+  "Fixed": "20261019000000"
+ },
+ {
   "Detector": "python-lock-certifi",
   "File": "uv.lock",
   "Line": 2,
@@ -176,12 +192,36 @@
   "Fixed": "2026.10.19"
  },
  {
+  "Detector": "grpcio-lock",
+  "File": "uv.lock",
+  "Line": 10,
+  "State": "vulnerable",
+  "Current": "grpcio 1.80.0",
+  "Fixed": "1.84.1"
+ },
+ {
   "Detector": "ci-bun-version",
   "File": ".github/workflows/ci.yml",
   "Line": 9,
   "State": "present",
   "Current": "bun-version:",
   "Fixed": ""
+ },
+ {
+  "Detector": "gcloud-image-bundles",
+  "File": "Dockerfile.gcloud",
+  "Line": 1,
+  "State": "absent",
+  "Current": "FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:576.0.0-slim",
+  "Fixed": ""
+ },
+ {
+  "Detector": "uv-image-tag",
+  "File": "Dockerfile.gcloud",
+  "Line": 2,
+  "State": "vulnerable",
+  "Current": "0.5.9",
+  "Fixed": "0.13.4"
  },
  {
   "Detector": "go-mod-language-line",
@@ -222,5 +262,21 @@
   "State": "present",
   "Current": "python-",
   "Fixed": ""
+ },
+ {
+  "Detector": "go-mod-language-line",
+  "File": "ok/go.mod",
+  "Line": 3,
+  "State": "vulnerable",
+  "Current": "1.27",
+  "Fixed": "1.27.3"
+ },
+ {
+  "Detector": "go-mod-language-line",
+  "File": "tools/go.mod",
+  "Line": 3,
+  "State": "vulnerable",
+  "Current": "1.27",
+  "Fixed": "1.27.3"
  }
 ]

@@ -434,7 +434,7 @@ func describe(res *fix.Result, applied bool) string {
 		fmt.Fprintf(&b, "  note: %s\n", res.Note)
 	}
 	if applied && res.PRURL == "" && res.Refused == "" && len(res.Edits)+len(res.Tools) > 0 && res.Note == "" {
-		fmt.Fprintf(&b, "  changes applied on branch %s; review with git diff, then re-run with --pr\n", res.Branch)
+		fmt.Fprintf(&b, "  changes applied on branch %s; review with git diff, then commit, or discard and run again with --apply --pr\n", res.Branch)
 	}
 	if len(res.Edits)+len(res.Tools)+len(res.Manual)+len(res.Skipped) == 0 && res.Refused == "" {
 		b.WriteString("  nothing to do\n")
