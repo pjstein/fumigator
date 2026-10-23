@@ -571,6 +571,13 @@ func (r *remediator) commitAndPR(name string) {
 	}
 	r.res.BodyPath = bp
 	if len(r.res.Edits) == 0 && len(r.res.Tools) == 0 && len(r.res.Manual) == 0 {
+		// an open PR still gets its checklist and caveats brought up to date
+		if url := openPRFor(repo, r.opt.Branch); url != "" {
+			r.res.PRURL = url
+			r.appendToExistingBody(url)
+			r.note("nothing left to change; open PR body refreshed")
+			return
+		}
 		r.note("nothing to change; no PR")
 		return
 	}
@@ -617,6 +624,17 @@ func (r *remediator) commitAndPR(name string) {
 		return
 	}
 	r.res.PRURL = s
+}
+
+// openPRFor returns the URL of the open PR whose head is branch in repo, or "".
+func openPRFor(repo, branch string) string {
+	c := exec.Command("gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "-q", ".[0].url")
+	c.Dir = repo
+	out, err := c.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // appendToExistingBody adds this run's edits and lockfile commands to an open PR's body, so
