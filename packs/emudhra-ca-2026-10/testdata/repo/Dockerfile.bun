@@ -1,0 +1,4 @@
+FROM oven/bun:1 AS floats
+FROM oven/bun:1.2 AS old
+FROM python:3.13.5-slim AS py
+FROM python:3.13-slim AS pyfloat

@@ -33,6 +33,7 @@ type Pack struct {
 	Strings map[string][]string `yaml:"strings"`
 
 	Detectors []Detector  `yaml:"detectors"`
+	Caveats   []Caveat    `yaml:"caveats"`
 	Host      []HostCheck `yaml:"host"`
 	Verify    []Probe     `yaml:"verify"`
 
@@ -97,6 +98,14 @@ type Fix struct {
 	Pattern string `yaml:"pattern"` // rewrite: optional regex applied to the matched line; To may use ${1}
 	To      string `yaml:"to"`      // rewrite/insert-after text; {fixed} {name} {current} interpolated
 	Command string `yaml:"command"` // tool: shell command; {fixed} {name} interpolated
+}
+
+// Caveat is a known problem with a fixed release, rendered in a PR body when one of Detectors
+// made an edit (and, when When is set, the edit's new text contains it).
+type Caveat struct {
+	Detectors []string `yaml:"detectors"`
+	When      string   `yaml:"when"`
+	Text      string   `yaml:"text"`
 }
 
 // HostCheck queries one collector table on the local machine, osquery-style: rows are filtered

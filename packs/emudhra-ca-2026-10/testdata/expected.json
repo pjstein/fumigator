@@ -99,9 +99,9 @@
   "Detector": "bun-image",
   "File": "Dockerfile",
   "Line": 9,
-  "State": "present",
-  "Current": "FROM oven/bun:1.2",
-  "Fixed": ""
+  "State": "vulnerable",
+  "Current": "oven/bun:1.2",
+  "Fixed": "1.4.4"
  },
  {
   "Detector": "node-image-line",
@@ -117,6 +117,30 @@
   "Line": 13,
   "State": "absent",
   "Current": "FROM nginx:1.27-alpine AS serve",
+  "Fixed": ""
+ },
+ {
+  "Detector": "bun-image",
+  "File": "Dockerfile.bun",
+  "Line": 2,
+  "State": "vulnerable",
+  "Current": "oven/bun:1.2",
+  "Fixed": "1.4.4"
+ },
+ {
+  "Detector": "base-image-ca-upgrade",
+  "File": "Dockerfile.bun",
+  "Line": 3,
+  "State": "absent",
+  "Current": "FROM python:3.13.5-slim AS py",
+  "Fixed": ""
+ },
+ {
+  "Detector": "base-image-ca-upgrade",
+  "File": "Dockerfile.bun",
+  "Line": 4,
+  "State": "absent",
+  "Current": "FROM python:3.13-slim AS pyfloat",
   "Fixed": ""
  },
  {
@@ -176,20 +200,36 @@
   "Fixed": "1.0.22"
  },
  {
-  "Detector": "package-json-engines-node",
-  "File": "package.json",
+  "Detector": "mix-lock-castore",
+  "File": "mix.lock",
   "Line": 3,
-  "State": "eol",
-  "Current": "18",
-  "Fixed": ""
+  "State": "vulnerable",
+  "Current": "certifi 2.15.0",
+  "Fixed": "2.18.0"
+ },
+ {
+  "Detector": "package-json-bun",
+  "File": "package.json",
+  "Line": 4,
+  "State": "vulnerable",
+  "Current": "1.2.5",
+  "Fixed": "1.4.4"
  },
  {
   "Detector": "package-json-electron",
   "File": "package.json",
-  "Line": 6,
+  "Line": 7,
   "State": "vulnerable",
   "Current": "43.2.0",
   "Fixed": "43.8.1"
+ },
+ {
+  "Detector": "package-json-bun",
+  "File": "package.json",
+  "Line": 10,
+  "State": "vulnerable",
+  "Current": "1.2.5",
+  "Fixed": "1.4.4"
  },
  {
   "Detector": "certifi-pin",
@@ -232,12 +272,12 @@
   "Fixed": "1.84.1"
  },
  {
-  "Detector": "ci-bun-version",
-  "File": ".github/workflows/ci.yml",
-  "Line": 9,
-  "State": "present",
-  "Current": "bun-version:",
-  "Fixed": ""
+  "Detector": "cpython-image-tag",
+  "File": "Dockerfile.bun",
+  "Line": 3,
+  "State": "vulnerable",
+  "Current": "python:3.13.5-slim",
+  "Fixed": "3.13.17"
  },
  {
   "Detector": "gcloud-sdk-bundles",
@@ -272,22 +312,6 @@
   "Fixed": ""
  },
  {
-  "Detector": "mix-lock-castore",
-  "File": "mix.lock",
-  "Line": 3,
-  "State": "unknown",
-  "Current": "certifi 2.15.0",
-  "Fixed": "pending"
- },
- {
-  "Detector": "package-json-bun",
-  "File": "package.json",
-  "Line": 7,
-  "State": "present",
-  "Current": "\"bun-types\":",
-  "Fixed": ""
- },
- {
   "Detector": "certifi-unpinned",
   "File": "constraints.txt",
   "Line": 1,
@@ -304,12 +328,52 @@
   "Fixed": ""
  },
  {
+  "Detector": "bun-image",
+  "File": "Dockerfile.bun",
+  "Line": 1,
+  "State": "floating",
+  "Current": "oven/bun:1",
+  "Fixed": "1.4.4"
+ },
+ {
+  "Detector": "cpython-image-tag",
+  "File": "Dockerfile.bun",
+  "Line": 4,
+  "State": "floating",
+  "Current": "python:3.13-slim",
+  "Fixed": "3.13.17"
+ },
+ {
+  "Detector": "cpython-image-tag",
+  "File": "Dockerfile.gcloud",
+  "Line": 4,
+  "State": "floating",
+  "Current": "python:3.13-slim",
+  "Fixed": "3.13.17"
+ },
+ {
+  "Detector": "cpython-image-tag",
+  "File": "Dockerfile.gcloud",
+  "Line": 8,
+  "State": "floating",
+  "Current": "python:3.13-slim",
+  "Fixed": "3.13.17"
+ },
+ {
   "Detector": "go-mod-language-line",
   "File": "ok/go.mod",
   "Line": 3,
   "State": "vulnerable",
   "Current": "1.27",
   "Fixed": "1.27.3"
+ },
+ {
+  "Detector": "package-json-engines-node",
+  "File": "package.json",
+  "Line": 3,
+  "State": "floating",
+  "Current": "24",
+  "Fixed": "24.22.1"
  },
  {
   "Detector": "go-mod-language-line",

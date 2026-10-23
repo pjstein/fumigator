@@ -1,9 +1,11 @@
 {
   "engines": {
-    "node": ">=18"
+    "node": "24",
+    "bun": "1.2.5"
   },
   "devDependencies": {
     "electron": "^43.2.0",
     "bun-types": "1.2.5"
-  }
+  },
+  "packageManager": "bun@1.2.5"
 }

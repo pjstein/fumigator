@@ -20,9 +20,9 @@ versions:
   rustls-webpki: {"*": "0.103.16"}
   composer-ca-bundle: {"1.4": "1.4.16", "1.5": "1.6.0", "1.6": "1.6.0"}
   castore: {"*": "1.0.22"}
-  erlang-certifi: {"*": "pending"}
+  erlang-certifi: {"*": "2.18.0"}
   electron: {"42": "42.11.16", "43": "43.8.1", "44": "44.9.1"}
-  bun: {"*": "pending"}
+  bun: {"*": "1.4.4"}
   brew-ca-certificates: {"*": "2026.09.25.1"}
   uv: {"*": "0.13.4"}
   pixi: {"*": "0.82.1"}
@@ -30,11 +30,17 @@ versions:
   mise: {"*": "2026.10.17"}
   claude: {"*": "2.1.303"}
   grpcio: {"*": "1.84.1"}
+  cpython: {"3.13": "3.13.17", "3.14": "3.14.9", "3.15": "3.15.1"}
   x509roots-fallback: {"*": "20261019000000"}
 eol:
   node: ["14", "16", "18", "19", "20", "21", "23", "25"]
   go: ["1.20", "1.21", "1.22", "1.23", "1.24", "1.25"]
   electron: ["30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41"]
+
+caveats:
+  - detectors: [node-pin, node-tool-versions, node-image-line, ci-node-version, package-json-engines-node]
+    when: "24.22.1"
+    text: "Node 24.22.1 has an open regression (nodejs/node#66781): a chunked HTTP response stalls after about 64 KB when the code writes strings with non-ASCII characters and waits for `drain`. Check any server here that streams that way before deploying."
 
 strings:
   bad_roots: ["AAA Certificate Services", "emSign ECC Root CA - G3", "emSign Root TLS CA - G3"]
@@ -80,14 +86,29 @@ detectors:
       eol: {kind: manual}
       unknown: {kind: manual}
 
-  - id: bun-image
-    type: content
+  - id: cpython-image-tag
+    type: regex-version
     files: *imagefiles
-    any: ['re:^\s*(?:-\s*)?(?:FROM\s+|(?:image|container):\s*["'']?)oven/bun(?::\S+)?']
-    severity: {present: high}
-    fix: {present: {kind: manual}}
-    note: "Bun has no fixed release; mount a clean bundle via NODE_EXTRA_CA_CERTS or build with node."
+    pattern: '^\s*(?:-\s*)?(?:FROM\s+(?:--platform=\S+\s+)?|(?:image|container):\s*["'']?)(?P<name>(?:[\w.-]+/)*python):(?P<version>3\.1[3-9][\w.+-]*)'
+    table: cpython
+    line_parts: 2
+    pin_parts: 3
+    severity: {vulnerable: medium, floating: info}
+    fix:
+      vulnerable: {kind: rewrite, capture: numeric, to: "{fixed}"}
+    note: "The advisory lists CPython 3.13.17, 3.14.9 and 3.15.1 as fixed. A floating tag (python:3.13-slim) picks them up on pull."
 
+  - id: bun-image
+    type: regex-version
+    files: *imagefiles
+    pattern: '^\s*(?:-\s*)?(?:FROM\s+(?:--platform=\S+\s+)?|(?:image|container):\s*["'']?)(?P<name>oven/bun):(?P<version>\d[\w.+-]*)'
+    table: bun
+    line_parts: 1
+    pin_parts: 3
+    severity: {vulnerable: high, floating: info}
+    fix:
+      vulnerable: {kind: rewrite, capture: numeric, to: "{fixed}"}
+    note: "Bun embeds its root store; 1.4.4 removes the compromised roots. A major-only tag (oven/bun:1) resolves to the newest 1.x on pull."
   - id: base-image-ca-upgrade
     # a bare distro FROM with no ca-certificates step in the same stage
     type: absent
@@ -159,12 +180,11 @@ detectors:
     table: node
     line_parts: 1
     pin_parts: 3
-    severity: {vulnerable: high, eol: high, floating: medium}
+    severity: {vulnerable: high, eol: high, floating: info}
     fix:
       vulnerable: {kind: rewrite, to: "{fixed}"}
-      floating: {kind: manual}
       eol: {kind: manual}
-    note: "engines.node / volta.node. A '>=' floor is not a pin; check CI before upgrading."
+    note: "engines.node / volta.node. Only an exact pin below the fix, or a major with no fixed release, is reported: a bare major or range (24, 24.x, >=22) already admits the fixed release, and some platforms (Firebase) require the bare major."
 
   - id: package-json-electron
     type: regex-version
@@ -181,13 +201,15 @@ detectors:
     note: "Electron ships Chromium's roots and gets no CRLSet updates."
 
   - id: package-json-bun
-    type: content
+    type: regex-version
     files: ["package.json"]
-    any: ['re:^\s*"(bun|bun-types)"\s*:']
-    severity: {present: medium}
-    fix: {present: {kind: manual}}
-    note: "Project uses Bun; no fixed release yet."
-
+    exclude: ["**/node_modules/**"]
+    pattern: '^\s*"(?:bun|packageManager)"\s*:\s*"(?:bun@)?[^"\d]*(?P<version>\d+\.\d+\.\d+)'
+    table: bun
+    severity: {vulnerable: high}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
+    note: "engines.bun, packageManager bun@..., or the bun package pin the Bun runtime; 1.4.4 removes the compromised roots. bun-types is only type definitions and is not checked."
   - id: go-mod-toolchain
     type: regex-version
     files: ["go.mod"]
@@ -236,13 +258,15 @@ detectors:
       eol: {kind: manual}
 
   - id: ci-bun-version
-    type: content
+    type: regex-version
     files: [".github/workflows/*.y*ml"]
-    any: ['re:^\s*bun-version:']
-    severity: {present: medium}
-    fix: {present: {kind: manual}}
-
-  # ---- packages that carry their own roots ----
+    pattern: '^\s*bun-version:\s*["'']?(?P<version>[^"''\s#]+)'
+    table: bun
+    skip: ["latest", "canary"]
+    pin_parts: 3
+    severity: {vulnerable: high, floating: info}
+    fix:
+      vulnerable: {kind: rewrite, to: "{fixed}"}
   - id: certifi-pin
     type: regex-version
     files: ["requirements*.txt", "constraints*.txt", "pyproject.toml", "Pipfile", "setup.py", "setup.cfg"]
@@ -315,7 +339,7 @@ detectors:
     fix:
       vulnerable: {kind: tool, command: "mix deps.update {name}"}
       unknown: {kind: manual}
-    note: "erlang-certifi has no fix yet; prefer castore or :public_key.cacerts_get()."
+    note: "castore 1.0.22 and erlang certifi 2.18.0 (2026-10-23) remove the compromised roots."
 
   # ---- libraries that ship their own root store (ignore certifi and the OS) ----
   - id: grpcio-lock
@@ -408,6 +432,12 @@ verify:
     expect: {fails: true}
   - id: curl-rejects-aaa-cross-sign
     run: ["curl", "-sSf", "--max-time", "10", "https://dv-g3b-aaa-emudhra.we-have-a-problem.com/"]
+    expect: {fails: true}
+  - id: curl-rejects-noct
+    run: ["curl", "-sSf", "--max-time", "10", "https://dv-g3b-noct-emudhra.we-have-a-problem.com/"]
+    expect: {fails: true}
+  - id: curl-rejects-aaa-noct
+    run: ["curl", "-sSf", "--max-time", "10", "https://dv-g3b-aaa-noct-emudhra.we-have-a-problem.com/"]
     expect: {fails: true}
   - id: git-rejects
     run: ["git", "ls-remote", "https://dv-g3b-emudhra.we-have-a-problem.com/"]
@@ -662,6 +692,14 @@ host:
       vulnerable: {command: "pipx runpip {name} install -q -U certifi"}
     note: "pipx upgrade only upgrades the app, not its dependencies; runpip reaches the venv's pip."
 
+  - id: cpython-interpreter
+    table: python_installs
+    where: {kind: "re:^(pythonorg|uv|pyenv|brew)$", version: "re:^3\\.1[3-9]\\."}
+    version: {column: version, table: cpython}
+    severity: {vulnerable: medium}
+    fix:
+      vulnerable: {suggest: "uv python install {fixed}  # or the python.org / pyenv / Homebrew installer for {kind}", manual: "{kind} Python {version} at {path} is below the fixed CPython {fixed}"}
+
   - id: grpcio-installed
     table: python_installs
     where: {kind: "re:^(pyenv|venv|pythonorg|conda|brew)$", grpcio: "re:."}
@@ -763,10 +801,9 @@ host:
     table: tools
     where: {name: bun}
     version: {column: version, table: bun}
-    severity: {unknown: high}
+    severity: {vulnerable: high}
     fix:
-      unknown: {manual: "Bun {version} has no fixed release (https://github.com/oven-sh/bun/pull/46159). Avoid it for public-internet fetches, or set NODE_EXTRA_CA_CERTS to a clean bundle."}
-
+      vulnerable: {command: "bun upgrade"}
   - id: elixir
     table: tools
     where: {name: elixir}

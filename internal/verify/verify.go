@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -373,6 +374,12 @@ for u in "$@"; do
   if command -v node >/dev/null 2>&1; then
     node -e "fetch(process.argv[1]).then(()=>process.exit(0),()=>process.exit(1))" "$u" 2>/dev/null && ok_fetch client node "$u" || ok_reject client node "$u"
   fi
+  if command -v bun >/dev/null 2>&1; then
+    bun -e "await fetch(process.argv[1])" "$u" >/dev/null 2>&1 && ok_fetch client bun "$u" || ok_reject client bun "$u"
+  fi
+  if command -v deno >/dev/null 2>&1; then
+    deno eval "await fetch(Deno.args[0])" "$u" >/dev/null 2>&1 && ok_fetch client deno "$u" || ok_reject client deno "$u"
+  fi
   if command -v java >/dev/null 2>&1; then
     d=$(mktemp -d 2>/dev/null || echo /tmp/fv$$); mkdir -p "$d"
     printf 'public class T{public static void main(String[] a)throws Exception{new java.net.URL(a[0]).openStream().close();}}' > "$d/T.java"
@@ -439,6 +446,8 @@ func probeImage(tag, df string, urls []string) []Step {
 		checked    int
 		fetched    []string
 		pipFetched []string // bypassed bundles that still list the roots, with the reason
+		clients    []string
+		bundles    int
 	}
 	per := map[string]*res{}
 	for _, u := range urls {
@@ -464,6 +473,11 @@ func probeImage(tag, df string, urls []string) []Step {
 			continue
 		}
 		r.checked++
+		if f[1] == "client" && !slices.Contains(r.clients, f[2]) {
+			r.clients = append(r.clients, f[2])
+		} else if f[1] == "bundle" {
+			r.bundles++
+		}
 		if f[4] == "FETCHED" {
 			label := f[2]
 			if why := bypassed(f[2], uses); f[1] == "bundle" && why != "" {
@@ -491,7 +505,7 @@ func probeImage(tag, df string, urls []string) []Step {
 			st.Detail = "STILL TRUSTS in " + df + ": " + strings.Join(r.fetched, "; ")
 		default:
 			st.Ran, st.Passed = true, true
-			st.Detail = fmt.Sprintf("rejected by all %d client and bundle checks in %s", r.checked-len(r.pipFetched), df)
+			st.Detail = fmt.Sprintf("rejected in %s by every client (%s) and all %d CA bundles in use", df, strings.Join(r.clients, ", "), r.bundles-len(r.pipFetched))
 		}
 		if len(r.pipFetched) > 0 {
 			st.Detail += ". Unused bundles that still list the roots: " + strings.Join(r.pipFetched, "; ")

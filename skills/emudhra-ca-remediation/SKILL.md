@@ -7,7 +7,10 @@ description: Find and fix exposure to the October 2026 eMudhra intermediate-CA c
 
 Incident data lives in `packs/emudhra-ca-2026-10/pack.yaml`: fixed versions per runtime, EOL
 lines, the affected root and intermediate names, detectors, fixes, and the trust-chain probes.
-Bun and erlang-certifi were still `pending` on 2026-10-22; check the advisory and edit the pack.
+As of 2026-10-23 the advisory lists fixes for Bun (1.4.4), erlang certifi (2.18.0) and CPython
+(3.13.17, 3.14.9, 3.15.1); Bottlerocket is still pending. Check the advisory and edit the pack
+when it changes. It names four test hosts: the eMudhra root, the Sectigo AAA cross-sign, and a
+no-CT variant of each; the probes use all four.
 
 ## Scan
 
@@ -29,7 +32,12 @@ States: `vulnerable` = pinned below the fixed release (rewrite); `floating` = un
 minor, a cached layer can satisfy it with an old build (rewrite to pin); `eol` = a line with
 no fixed release (manual: Node ≤ 21/23/25, Go < 1.26, Electron < 42); `absent` = a distro or
 python `FROM` with no ca-certificates/certifi step in that stage (insert-after); `present` =
-a signature hit (vendored bundle, builder-stage bundle copy, Bun, `lts/*` alias).
+a signature hit (vendored bundle, builder-stage bundle copy, `lts/*` alias).
+
+`engines` ranges that already admit a fixed release (`24`, `24.x`, `>=22`) are not reported:
+they are constraints, not pins, and some platforms require them (Firebase reads a bare major).
+Only an exact pin below the fix, or a major with no fixed release, needs action. Moving to Node
+24.22.1 carries a known regression (nodejs/node#66781); the PR body says so when it applies.
 
 Lockfile findings are `tool` fixes: never hand-edit a lockfile. The command is in the finding.
 
@@ -56,7 +64,7 @@ fumigator host --pack emudhra-ca-2026-10 --tables   # the raw inventory, for deb
 ```
 
 SUDO lines are printed with the exact command for the person to run. TODO lines are
-decisions (EOL Node lines still pinned by repos, Bun, Electron apps). The report lands in
+decisions (EOL Node lines still pinned by repos, Electron apps). The report lands in
 `findings/emudhra-ca-2026-10/host-<hostname>.json` with every table, finding, action and probe.
 
 ## Verify

@@ -1,6 +1,9 @@
 package fix
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCommandFor(t *testing.T) {
 	chain := "uvx uv@0.13.4 lock --upgrade-package grpcio || poetry update grpcio || pdm update grpcio"
@@ -48,5 +51,17 @@ func TestHashPinned(t *testing.T) {
 	}
 	if hashPinned(lines, 3) {
 		t.Error("plain pin is not hash-pinned")
+	}
+}
+
+func TestReplaceSection(t *testing.T) {
+	body := "## Why\n\nx\n\n## Still needs a human (not changed by this PR)\n\n- [ ] old\n\n## Verify before merging\n\n- [ ] CI\n\n🤖 Generated"
+	got := replaceSection(body, "Still needs a human (not changed by this PR)", "")
+	if strings.Contains(got, "old") || !strings.Contains(got, "## Verify before merging") {
+		t.Errorf("drop section:\n%s", got)
+	}
+	got = replaceSection(body, "Known caveats", "## Known caveats\n\n- c")
+	if !strings.Contains(got, "## Known caveats\n\n- c\n\n## Verify before merging") && !strings.Contains(got, "## Known caveats\n\n- c\n## Verify") {
+		t.Errorf("add section before verify:\n%s", got)
 	}
 }

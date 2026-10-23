@@ -175,9 +175,14 @@ func classify(p *pack.Pack, d *pack.Detector, table, ver string) (state findings
 		return findings.Floating, p.Latest(table)
 	}
 	if floor, ok := p.Versions[table]["*"]; ok {
-		// single-floor table (certifi, deno): any parsed version compares against the floor
+		// single-floor table (certifi, deno, bun): any parsed version compares against the floor
 		if floor == "pending" {
 			return findings.Unknown, ""
+		}
+		// a short tag that is a prefix of the floor (bun:1 for 1.4.4) resolves to the newest
+		// release on that line when pulled: floating, not below the fix. bun:1.2 is not a prefix.
+		if version.Parts(num) < d.PinParts && strings.HasPrefix(floor, num+".") {
+			return findings.Floating, floor
 		}
 		if version.Less(num, floor) {
 			return findings.Vulnerable, floor

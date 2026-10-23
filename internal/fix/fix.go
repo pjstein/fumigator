@@ -32,11 +32,12 @@ type Options struct {
 }
 
 type Edit struct {
-	File   string
-	Line   int
-	Before string
-	After  string
-	Why    string
+	File     string
+	Line     int
+	Before   string
+	After    string
+	Why      string
+	Detector string
 }
 
 type ToolRun struct {
@@ -289,7 +290,7 @@ func (r *remediator) rewrite(f findings.Finding) {
 	}
 	r.files[f.File][i] = after
 	r.dirty[f.File] = true
-	r.res.Edits = append(r.res.Edits, Edit{f.File, i + 1, old, after, why(f)})
+	r.res.Edits = append(r.res.Edits, Edit{f.File, i + 1, old, after, why(f), f.Detector})
 	r.refreshComment(f.File, i, f.Replace, f.FixText)
 }
 
@@ -351,7 +352,7 @@ func (r *remediator) refreshComment(rel string, i int, oldVer, newVer string) {
 			n = isoDate.ReplaceAllString(n, time.Now().Format("2006-01-02"))
 		}
 		lines[j] = n
-		r.res.Edits = append(r.res.Edits, Edit{rel, j + 1, l, n, "comment named the old pin"})
+		r.res.Edits = append(r.res.Edits, Edit{rel, j + 1, l, n, "comment named the old pin", ""})
 		return
 	}
 }
@@ -394,7 +395,7 @@ func (r *remediator) insertAfter(f findings.Finding) {
 	lines = append(lines[:i+1], append(ins, lines[i+1:]...)...)
 	r.files[f.File] = lines
 	r.dirty[f.File] = true
-	r.res.Edits = append(r.res.Edits, Edit{f.File, i + 1 + len(ins), "", strings.Join(ins, " / "), why(f)})
+	r.res.Edits = append(r.res.Edits, Edit{f.File, i + 1 + len(ins), "", strings.Join(ins, " / "), why(f), f.Detector})
 }
 
 func (r *remediator) flush() {
@@ -594,15 +595,14 @@ func (r *remediator) commitAndPR(name string) {
 // appendToExistingBody adds this run's edits and lockfile commands to an open PR's body, so
 // its table of changes stays complete when a later pack version adds rules.
 func (r *remediator) appendToExistingBody(url string) {
-	if len(r.res.Edits) == 0 && len(r.res.Tools) == 0 {
-		return
-	}
 	cur, err := exec.Command("gh", "pr", "view", url, "--json", "body", "-q", ".body").Output()
 	if err != nil {
 		return
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n## Additional changes (%s)\n\n", time.Now().Format("2006-01-02"))
+	if len(r.res.Edits) > 0 || len(r.res.Tools) > 0 {
+		fmt.Fprintf(&b, "\n## Additional changes (%s)\n\n", time.Now().Format("2006-01-02"))
+	}
 	if len(r.res.Edits) > 0 {
 		b.WriteString("| File | Line | Before | After | Why |\n|---|---|---|---|---|\n")
 		for _, e := range r.res.Edits {
@@ -619,6 +619,9 @@ func (r *remediator) appendToExistingBody(url string) {
 	} else {
 		body += b.String()
 	}
+	body = replaceSection(body, "Known caveats", strings.TrimSuffix(CaveatsSection(r.p, r.res.Edits, r.res.Tools), "\n"))
+	// the checklist reflects the current findings: items a newer pack no longer reports go away
+	body = replaceSection(body, "Still needs a human (not changed by this PR)", strings.TrimSuffix(ManualSection(r.res.Manual), "\n"))
 	tmp, err := os.CreateTemp("", "fumigator-body-*.md")
 	if err != nil {
 		return
@@ -629,6 +632,27 @@ func (r *remediator) appendToExistingBody(url string) {
 	if exec.Command("gh", "pr", "edit", url, "--body-file", tmp.Name()).Run() == nil {
 		r.note("PR body extended with this run's changes")
 	}
+}
+
+// replaceSection swaps the body of "## heading" (up to the next "## " or the footer) for
+// content, which is a full section with its heading, or "" to drop it. A missing section is
+// added before "## Verify before merging" when content is non-empty.
+func replaceSection(body, heading, content string) string {
+	re := regexp.MustCompile(`(?s)\n## ` + regexp.QuoteMeta(heading) + `\n.*?(\n## |\n🤖|\z)`)
+	if loc := re.FindStringSubmatchIndex(body); loc != nil {
+		repl := ""
+		if content != "" {
+			repl = "\n" + strings.TrimRight(content, "\n") + "\n"
+		}
+		return body[:loc[0]] + repl + body[loc[2]:]
+	}
+	if content == "" {
+		return body
+	}
+	if i := strings.Index(body, "\n## Verify before merging"); i >= 0 {
+		return body[:i] + "\n" + strings.TrimRight(content, "\n") + "\n" + body[i:]
+	}
+	return body + "\n" + content
 }
 
 // Body renders the PR body: why (from the pack), every edit, lockfiles, the human checklist,
@@ -652,24 +676,58 @@ func Body(p *pack.Pack, name string, res *Result) string {
 		}
 		b.WriteString("\n")
 	}
-	if len(res.Manual) > 0 {
-		b.WriteString("## Still needs a human (not changed by this PR)\n\n")
-		for _, f := range res.Manual {
-			loc := f.File
-			if f.Line > 0 {
-				loc = fmt.Sprintf("%s:%d", f.File, f.Line)
-			}
-			to := f.Fixed
-			if to == "" {
-				to = "—"
-			}
-			fmt.Fprintf(&b, "- [ ] **%s** `%s` — %s (%s): %s → %s. %s\n", f.Severity, loc, f.Detector, f.State, f.Current, to, f.Note)
-		}
-		b.WriteString("\n")
-	}
+	b.WriteString(CaveatsSection(p, res.Edits, res.Tools))
+	b.WriteString(ManualSection(res.Manual))
 	b.WriteString(VerifySection(p, res))
 	b.WriteString("\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n")
 	return b.String()
+}
+
+// ManualSection renders "Still needs a human" from the current manual findings; "" when none.
+func ManualSection(manual []findings.Finding) string {
+	if len(manual) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Still needs a human (not changed by this PR)\n\n")
+	for _, f := range manual {
+		loc := f.File
+		if f.Line > 0 {
+			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
+		}
+		to := f.Fixed
+		if to == "" {
+			to = "—"
+		}
+		fmt.Fprintf(&b, "- [ ] **%s** `%s` — %s (%s): %s → %s. %s\n", f.Severity, loc, f.Detector, f.State, f.Current, to, f.Note)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// CaveatsSection renders the pack's caveats that apply to these edits; "" when none.
+func CaveatsSection(p *pack.Pack, edits []Edit, tools []ToolRun) string {
+	var out []string
+	for _, c := range p.Caveats {
+		hit := false
+		for _, e := range edits {
+			if slices.Contains(c.Detectors, e.Detector) && (c.When == "" || strings.Contains(e.After, c.When)) {
+				hit = true
+			}
+		}
+		for _, t := range tools {
+			if slices.Contains(c.Detectors, t.Finding.Detector) && (c.When == "" || strings.Contains(t.Finding.Fixed, c.When)) {
+				hit = true
+			}
+		}
+		if hit {
+			out = append(out, "- "+strings.TrimSpace(c.Text))
+		}
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return "## Known caveats\n\n" + strings.Join(out, "\n") + "\n\n"
 }
 
 // VerifySection renders the "Verify before merging" checklist: CI, a build of each Dockerfile

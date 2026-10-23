@@ -103,7 +103,7 @@ a script, model weights fetched from a bucket): build it the way the project doe
 touched plus every Dockerfile whose `COPY`/`ADD` inputs include a file it changed (a
 lockfile bump changes the image even when the Dockerfile does not). Inside each built image
 it fetches the advisory's test hosts with every TLS client present (curl or wget, Python's
-default context, certifi, Node, Java), then with every CA bundle file on disk as an explicit
+default context, certifi, Node, Bun, Deno, Java), and names each one in the result, then with every CA bundle file on disk as an explicit
 trust store: certifi, gRPC's `roots.pem`, httplib2, botocore, the system bundle. The image
 passes only if every bundle the image actually uses refuses. A bundle that is present but
 bypassed is reported, not counted: pip's private certifi (only pip installs read it), an
