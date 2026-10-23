@@ -587,7 +587,10 @@ func (r *remediator) commitAndPR(name string) {
 	if r.opt.Base != "" && gitErr(repo, "fetch", "-q", "origin", r.opt.Base) == nil {
 		baseRef = "FETCH_HEAD"
 	}
-	if r.opt.Base != "" && gitErr(repo, "diff", "--quiet", baseRef, "HEAD") == nil {
+	// "nothing to push" means no commits the base lacks; a branch that is behind or equal to
+	// the base has none, whatever its tree looks like
+	ahead := strings.TrimSpace(git(repo, "rev-list", "--count", baseRef+"..HEAD").String())
+	if r.opt.Base != "" && (ahead == "0" || gitErr(repo, "diff", "--quiet", baseRef, "HEAD") == nil) {
 		r.res.ManualOnly = true
 		r.note("manual items only, no file changes: no PR; body at " + bp + " for an issue")
 		_ = gitErr(repo, "checkout", "-q", r.opt.Base)
