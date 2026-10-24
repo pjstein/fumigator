@@ -80,8 +80,10 @@ local branch that has diverged; never force-pushes; returns the clone to the bra
 on; appends later edits to an open PR's body as "Additional changes"; never hand-edits a lockfile. Lockfile fixes are tool commands that run with `--run-tools`,
 using the program that owns that lockfile (uv for `uv.lock`, Poetry for `poetry.lock`, ...)
 and, for `uv.lock`, the newest uv release that keeps the lock's existing revision, so CI on
-an older uv can still read it. A tool that is missing or fails becomes a checklist item, and
-any manifest pin raised for that package is rolled back so manifest and lock agree. Pins in
+an older uv can still read it. A tool that is missing, fails, or is not run (no `--run-tools`) becomes an item
+under "Still needs a human", and any manifest pin raised for that package is rolled back so
+manifest and lock agree. Those items are plain bullets, not task boxes, so repos whose PR gate
+fails on unchecked boxes still pass. Rewritten files keep their final-newline state. Pins in
 hash-pinned requirements files are never rewritten; they must be re-exported. Stages tracked
 files plus lockfiles the repository already tracks, never new ones. Commits and PR
 titles start `fix(security):`. The PR body is the same everywhere: why, the advisory, a

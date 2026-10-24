@@ -27,7 +27,7 @@ References: incident page · Go CVE-2026-111943 · PHP advisory
 
 ## Still needs a human (not changed by this PR)
 
-- [ ] **high** `.nvmrc`:1 — node-pin: 20.14.0 → 24.22.1. Node 20 is EOL, no fixed release; needs an upgrade decision
+- **high** `.nvmrc`:1 — node-pin: 20.14.0 → 24.22.1. Node 20 is EOL, no fixed release; needs an upgrade decision
 
 ## Verify before merging
 

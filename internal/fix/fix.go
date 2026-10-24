@@ -77,6 +77,7 @@ type remediator struct {
 	opt   Options
 	files map[string][]string // rel -> lines (with edits applied)
 	dirty map[string]bool
+	noEOL map[string]bool // files that had no final newline; flush keeps it that way
 	res   *Result
 }
 
@@ -85,7 +86,7 @@ func Run(p *pack.Pack, rep *findings.RepoReport, opt Options) *Result {
 	if opt.Branch == "" {
 		opt.Branch = "sec/" + p.ID
 	}
-	r := &remediator{p: p, repo: rep.Repo, opt: opt, files: map[string][]string{}, dirty: map[string]bool{},
+	r := &remediator{p: p, repo: rep.Repo, opt: opt, files: map[string][]string{}, dirty: map[string]bool{}, noEOL: map[string]bool{},
 		res: &Result{Repo: rep.Repo, Branch: opt.Branch}}
 	isGit := isGitRepo(rep.Repo)
 
@@ -232,6 +233,9 @@ func (r *remediator) lines(rel string) ([]string, bool) {
 	if err != nil {
 		r.res.Skipped = append(r.res.Skipped, rel+": "+err.Error())
 		return nil, false
+	}
+	if len(b) > 0 && !bytes.HasSuffix(b, []byte("\n")) {
+		r.noEOL[rel] = true
 	}
 	l := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
 	r.files[rel] = l
@@ -409,7 +413,11 @@ func (r *remediator) insertAfter(f findings.Finding) {
 func (r *remediator) flush() {
 	for rel := range r.dirty {
 		p := filepath.Join(r.repo, rel)
-		if err := os.WriteFile(p, []byte(strings.Join(r.files[rel], "\n")+"\n"), 0o644); err != nil {
+		out := strings.Join(r.files[rel], "\n")
+		if !r.noEOL[rel] {
+			out += "\n"
+		}
+		if err := os.WriteFile(p, []byte(out), 0o644); err != nil {
 			r.res.Skipped = append(r.res.Skipped, rel+": write: "+err.Error())
 		}
 	}
@@ -440,8 +448,11 @@ func (r *remediator) runTools(tools []findings.Finding) {
 			if !r.opt.Apply {
 				r.res.Tools = append(r.res.Tools, tr)
 			} else {
+				// the lock is not regenerated here, so a pin raised in the same directory
+				// would disagree with it (uv sync --locked fails); roll the pin back
 				f.Note = "run: `" + cmd + "`. " + f.Note
 				r.res.Manual = append(r.res.Manual, f)
+				r.undoPinsFor(rel, f)
 			}
 			continue
 		}
@@ -498,7 +509,7 @@ func (r *remediator) runTools(tools []findings.Finding) {
 func (r *remediator) undoPinsFor(rel string, f findings.Finding) {
 	pkg := packageOf(f.Current)
 	for _, e := range r.rollbackPins(rel, pkg) {
-		r.res.Skipped = append(r.res.Skipped, fmt.Sprintf("%s:%d reverted the %s pin: the lock in %s could not be regenerated, so the manifest is left matching the lock", e.File, e.Line, pkg, rel))
+		r.res.Skipped = append(r.res.Skipped, fmt.Sprintf("%s:%d reverted the %s pin: the lock in %s was not regenerated, so the manifest is left matching the lock", e.File, e.Line, pkg, rel))
 	}
 }
 
@@ -752,7 +763,9 @@ func ManualSection(manual []findings.Finding) string {
 		if to == "" {
 			to = "—"
 		}
-		fmt.Fprintf(&b, "- [ ] **%s** `%s` — %s (%s): %s → %s. %s\n", f.Severity, loc, f.Detector, f.State, f.Current, to, f.Note)
+		// plain bullets, not task boxes: these are decisions outside the PR, and repos that
+		// gate on unchecked boxes would fail a PR for listing them
+		fmt.Fprintf(&b, "- **%s** `%s` — %s (%s): %s → %s. %s\n", f.Severity, loc, f.Detector, f.State, f.Current, to, f.Note)
 	}
 	b.WriteString("\n")
 	return b.String()
